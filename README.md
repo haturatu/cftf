@@ -54,10 +54,6 @@ umask 077
 set -a
 . ./.env
 set +a
-export CLOUDFLARE_API_TOKEN="$CF_API_TOKEN"
-export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
-export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-export AWS_EC2_METADATA_DISABLED=true
 ```
 
 各 root には、対応する `.tfvars` と `.backend.hcl` を指定します。
