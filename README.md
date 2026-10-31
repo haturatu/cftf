@@ -75,6 +75,7 @@ Config 取得用キーは読み取り専用、State 用キーはそのバケッ�
 
 Arch Linux 系では、次のコマンドで依存パッケージをインストールします。
 
+### Setup
 ```sh
 sudo pacman -S --needed \
   bash coreutils git github-cli jq terraform python python-pip aws-cli
@@ -95,11 +96,14 @@ source ./scripts/tf-completion.bash
 `.env.example` にある標準名で認証情報と承認済みの R2 リビジョンを設定し、リポジトリルートから読み込みます。既存の `.env` は上書きしないでください。
 
 ローカルの操作は、基本的に `terraform` のラッパーシェル経由で操作します。  
+
+### Usage
 ```sh
 $ ./scripts/tf.sh
 ERROR: usage: scripts/tf.sh <approved-target> <plan|apply>
 ```
 
+### plan / apply
 ```sh
 umask 077
 set -a
@@ -121,14 +125,16 @@ set +a
 
 ## 検証と初回取り込み
 
-テストは Bash の入口から Python 標準ライブラリを実行します。Node.js と追加の Python パッケージは不要です。GitHub API はモックし、ネットワーク接続なしで承認、マージ、実行要求を検証します。
+GitHub API はモックし、ネットワーク接続なしで承認、マージ、実行要求を検証します。
 
-シェルの静的解析には `shellcheck`、Workflow の検証には `actionlint` を使います。
+依存関係としてシェルの静的解析には `shellcheck`、Workflow の検証には `actionlint` を使います。
 
+### インストール
 ```sh
 sudo pacman -S --needed shellcheck shfmt actionlint
 ```
 
+### テスト
 ```sh
 terraform fmt -check -recursive
 .github/scripts/control.test.sh
