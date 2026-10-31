@@ -50,11 +50,9 @@ jobs:
           repositories: cftf-deploy
           permission-actions: write
       - name: Approve a commit, merge checked code, and request deployment
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           DISPATCH_TOKEN: ${{ steps.dispatch-token.outputs.token }}
           ALLOWED_APPLIERS: ${{ vars.ALLOWED_APPLIERS || '["haturatu"]' }}
-        with:
-          script: |
-            const control = require('./.github/scripts/control.cjs');
-            await control.main({github, context, core});
+        run: .github/scripts/control.sh

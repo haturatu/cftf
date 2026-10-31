@@ -73,6 +73,15 @@ Config 取得用キーは読み取り専用、State 用キーはそのバケッ�
 
 ## 手動で plan する
 
+Arch Linux 系では、次のコマンドで依存パッケージをインストールします。
+
+```sh
+sudo pacman -S --needed \
+  bash coreutils git github-cli jq terraform python python-pip aws-cli
+```
+
+Terraform は CI と同じ `1.15.9` を使います。`gh` コマンドのパッケージ名は `github-cli` です。
+
 手動実行も、Private 側の共通処理を呼び出して R2 から設定を取得します。隣接する `cftf-deploy` の checkout と、その仮想環境を準備してください。配置が異なる場合は `CFTF_DEPLOY_DIR` と `CFTF_DEPLOY_PYTHON` を指定します。
 
 `.env.example` にある標準名で認証情報と承認済みの R2 リビジョンを設定し、リポジトリルートから読み込みます。既存の `.env` は上書きしないでください。
@@ -104,14 +113,32 @@ set +a
 
 ## 検証と初回取り込み
 
+テストは Bash の入口から Python 標準ライブラリを実行します。Node.js と追加の Python パッケージは不要です。GitHub API はモックし、ネットワーク接続なしで承認、マージ、実行要求を検証します。
+
+シェルの静的解析には `shellcheck`、Workflow の検証には `actionlint` を使います。
+
+```sh
+sudo pacman -S --needed shellcheck actionlint
+```
+
 ```sh
 terraform fmt -check -recursive
-node --test .github/scripts/control.test.cjs
+.github/scripts/control.test.sh
+shellcheck scripts/tf.sh .github/scripts/control.sh .github/scripts/control.test.sh
 terraform -chdir=modules/zone init -backend=false -input=false
 terraform -chdir=modules/zone test
 terraform -chdir=bootstrap/backend init -backend=false -input=false
 terraform -chdir=bootstrap/backend test
 ```
+
+Workflow の `queue: max` は actionlint `1.7.12` が認識しないため、その警告だけを除外します。
+
+```sh
+actionlint -ignore 'unexpected key "queue" for "concurrency" section' \
+  .github/workflows/*.yml
+```
+
+シェルは [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html) に沿って短い入口に留め、承認判定や API 操作は Python で実装します。
 
 各 stack には Provider lock ファイルを置き、Provider を固定します。R2 と Worker の入力は使用する機能に合わせた `map(object(...))` で定義し、ID、リージョン、参照先、公開設定を検証します。Worker は Terraform で引き続き管理し、既存の Secret を保持します。
 
