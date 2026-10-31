@@ -1,0 +1,12 @@
+{
+  "account_id": "REPLACE_WITH_ACCOUNT_ID",
+  "zones": {},
+  "zone_settings": {},
+  "dns_records": {},
+  "buckets": {},
+  "workers": {},
+  "worker_crons": {},
+  "worker_routes": {},
+  "worker_domains": {},
+  "rulesets": {}
+}
