@@ -1,0 +1,60 @@
+name: Merge and request private apply
+
+"on":
+  pull_request_target:
+    branches: [master]
+    types: [labeled, unlabeled, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: [Terraform checks]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Retry a request for a merged or open pull request
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: terraform-merge-controller
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  control:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      statuses: write
+      checks: read
+      actions: read
+    steps:
+      - name: Read controller only from the trusted default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: master
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Create a token scoped to dispatching the private workflow
+        id: dispatch-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.DEPLOY_APP_ID }}
+          private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
+          owner: haturatu
+          repositories: cftf-deploy
+          permission-actions: write
+      - name: Approve a commit, merge checked code, and request deployment
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          DISPATCH_TOKEN: ${{ steps.dispatch-token.outputs.token }}
+          ALLOWED_APPLIERS: ${{ vars.ALLOWED_APPLIERS || '["haturatu"]' }}
+        with:
+          script: |
+            const control = require('./.github/scripts/control.cjs');
+            await control.main({github, context, core});

@@ -1,0 +1,37 @@
+name: Terraform checks
+
+"on":
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Terraform checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.15.9
+          terraform_wrapper: false
+      - name: Validate public code without infrastructure credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive
+          node --test .github/scripts/control.test.cjs
+          for root in stacks/zone stacks/r2 stacks/workers bootstrap/backend; do
+            terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly
+            terraform -chdir="$root" validate
+          done
+          terraform -chdir=modules/zone init -backend=false -input=false
+          terraform -chdir=modules/zone test
+          terraform -chdir=bootstrap/backend test
