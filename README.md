@@ -1,3 +1,18 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Cloudflare の Terraform 管理](#cloudflare-%E3%81%AE-terraform-%E7%AE%A1%E7%90%86)
+  - [構成](#%E6%A7%8B%E6%88%90)
+  - [PR のラベルから apply する流れ](#pr-%E3%81%AE%E3%83%A9%E3%83%99%E3%83%AB%E3%81%8B%E3%82%89-apply-%E3%81%99%E3%82%8B%E6%B5%81%E3%82%8C)
+  - [R2 の設定リビジョン](#r2-%E3%81%AE%E8%A8%AD%E5%AE%9A%E3%83%AA%E3%83%93%E3%82%B8%E3%83%A7%E3%83%B3)
+  - [手動で plan する](#%E6%89%8B%E5%8B%95%E3%81%A7-plan-%E3%81%99%E3%82%8B)
+  - [検証と初回取り込み](#%E6%A4%9C%E8%A8%BC%E3%81%A8%E5%88%9D%E5%9B%9E%E5%8F%96%E3%82%8A%E8%BE%BC%E3%81%BF)
+  - [Bootstrap と復旧](#bootstrap-%E3%81%A8%E5%BE%A9%E6%97%A7)
+  - [参考資料](#%E5%8F%82%E8%80%83%E8%B3%87%E6%96%99)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Cloudflare の Terraform 管理
 
 Terraform のコードは Git、設定値と Worker ソースは非公開 R2、state は別の専用 R2 バケットで管理します。ドメイン名、Zone ID、バケット名、認証情報は公開コードに含めません。
