@@ -1,145 +1,112 @@
 # Cloudflare の Terraform 管理
 
-Cloudflare のリソースを、匿名の Zone 単位とアカウントの用途単位で管理します。実際のドメイン、リソース名、識別子、設定値、Worker ソースは `.private/` に、認証情報は `.env` に置きます。これらは Git 管理から除外します。
+Terraform のコードは Git、設定値と Worker ソースは非公開 R2、state は別の専用 R2 バケットで管理します。ドメイン名、Zone ID、バケット名、認証情報は公開コードに含めません。
 
 ## 構成
 
 ```text
 cftf/
-├── .env.example
-├── .private/                     # Git 管理外
-│   ├── zone-001.tfvars
-│   ├── zone-001.backend.hcl
-│   ├── personal-r2.tfvars
-│   ├── personal-r2.backend.hcl
-│   └── ...
-├── accounts/personal/
-│   ├── backend/                  # 専用 state バケットの管理
-│   ├── r2/                       # アプリ用バケットの管理
-│   ├── workers/
-│   └── zones/
-│       ├── zone-001/
-│       ├── zone-002/
-│       └── zone-003/
+├── .github/workflows/         # 非機密の検証、ラベル承認、マージと実行要求
+├── stacks/
+│   ├── zone/                 # 全 Zone が共有する root
+│   ├── r2/
+│   └── workers/
+├── modules/zone/             # 既存リソースアドレスを維持する共通定義
+├── bootstrap/backend/        # State・Config バケットの初期構築と復旧専用
+├── scripts/tf.sh             # 共通の手動実行窓口
 ├── examples/
-└── modules/zone/
-    ├── main.tf
-    ├── variables.tf
-    ├── dns.tf
-    ├── settings.tf
-    └── rulesets.tf
+└── .private/                 # Git 管理外の一時データと診断ログ
 ```
 
-`zone-001` などの名前はローカルの管理用識別子です。Cloudflare の Zone ID やドメイン名とは関係ありません。各ディレクトリが独立したルートモジュールであり、独立した state を持ちます。
+Zone の違いは非公開の入力値と state キーだけです。`zone-001` などの匿名ターゲットを、Private 側の許可リストで管理します。Zone の追加時に Terraform ファイルを複製する必要はありません。
 
-Zone の共通定義は `modules/zone` にまとめています。Zone の root にある `imports.tf` が、その Zone に属する既存リソースを子モジュールへ取り込みます。
+`stacks/zone` は `module.zone` のリソースアドレスを維持します。各ターゲットの `TF_DATA_DIR` と既存の state キーを分け、同じ root を使っても state が混ざらない構成です。`init -reconfigure` は選択した backend を初期化する処理であり、state の移行は行いません。
 
-## 前提条件
+## PR のラベルから apply する流れ
 
-- Terraform 1.10 以上、2.0 未満
-- Cloudflare API トークン
-- 専用 R2 バケットと、そのバケットへアクセスできる S3 互換の認証情報
-- 非公開の変数ファイル、backend 設定、Worker ソースのバックアップ
+1. PR の `Terraform checks` が、認証情報なしでフォーマット、構文、モックテストを検証します。
+2. 許可された利用者が `terraform-apply` ラベルを付け、その時点の head SHA を承認します。
+3. チェック成功とレビュー状態を確認して squash merge します。PR 更新時はラベルと承認を無効にします。
+4. マージ後の確定 SHA を Private リポジトリ `haturatu/cftf-deploy` に通知します。
+5. Private CI が承認、マージ SHA、最新の master を再確認し、R2 の固定リビジョンを取得します。
+6. 全ターゲットの plan を検査し、削除・置き換えを拒否したうえで保存済み plan を適用します。
 
-Provider は各 root の `versions.tf` と `.terraform.lock.hcl` で固定しています。R2 backend に使用するバケットは専用とし、アプリ用バケットと共有しません。
+公開側へ返すのは固定の成功・失敗・後続コミットによる置き換え通知だけです。plan 本文、リソース種別、件数、ドメイン、ID は公開しません。公開側で本番の Terraform コードを実行せず、Private CI も PR ブランチではなくマージ済みコミットだけを使います。
 
-## 認証情報と非公開設定
+`AUTOMATION_ENABLED` と Private 側の `DEPLOY_ENABLED` は初期状態では `false` です。無料枠の復旧、GitHub App の設定、本番設定の確認が済むまで有効にしません。GitHub App の作成手順と Secrets の設定方法は Private リポジトリの README にあります。
 
-既存の `.env` と `.private/` は上書きせずに使用してください。新しい環境では `.env.example` と `examples/` の設定例をコピーし、非公開の値を入力します。認証情報を入力したファイルのアクセス権は `600`、`.private/` は `700` にします。
+## R2 の設定リビジョン
 
-Terraform は `.env` を自動で読み込みません。リポジトリルートで、内容を確認した自分の `.env` を読み込みます。
+非公開 Config バケットの `revisions/<revision>/` に、次のファイルを保管します。
+
+```text
+backend.hcl
+zones/<anonymous-target>.tfvars.json
+r2.tfvars.json
+workers.tfvars.json
+workers/...
+manifest.json
+```
+
+`backend.hcl` は共通のバケット名、エンドポイント、S3 互換設定を持ち、state キーを含みません。実行側の許可リストがターゲットごとの既存キーを指定します。Config と State のバケットは別にします。
+
+JSON 形式の tfvars は Terraform 標準の入力形式です。Zone 設定の動的な値は `value_json`、ルール配列は `rules_json` として保持します。Worker のソースパスはダウンロード先の絶対パスに置き換えます。
+
+CI は Private 側で固定したリビジョンと manifest の SHA-256 を検証し、さらに各ファイルのサイズと SHA-256 を検証します。既存リビジョンを上書きせず、設定変更時は新しいリビジョンを発行して承認します。設定ファイルそのものを GitHub Secrets や Git に保存する必要はありません。
+
+Config 取得用キーは読み取り専用、State 用キーはそのバケットの読み書き用として分離します。Cloudflare Provider の認証は別の CI 専用トークンです。GitHub App の秘密鍵を含め、実値は Public リポジトリへ置きません。
+
+## 手動で plan する
+
+手動実行も、Private 側の共通処理を呼び出して R2 から設定を取得します。隣接する `cftf-deploy` の checkout と、その仮想環境を準備してください。配置が異なる場合は `CFTF_DEPLOY_DIR` と `CFTF_DEPLOY_PYTHON` を指定します。
+
+`.env.example` にある標準名で認証情報と承認済みの R2 リビジョンを設定し、リポジトリルートから読み込みます。既存の `.env` は上書きしないでください。
 
 ```sh
 umask 077
 set -a
 . ./.env
 set +a
+./scripts/tf.sh zone-001 plan
+./scripts/tf.sh zone-002 plan
+./scripts/tf.sh r2 plan
+./scripts/tf.sh workers plan
 ```
 
-各 root には、対応する `.tfvars` と `.backend.hcl` を指定します。
-
-| Root | 変数ファイル | Backend 設定 |
-| --- | --- | --- |
-| `accounts/personal/zones/zone-001` | `.private/zone-001.tfvars` | `.private/zone-001.backend.hcl` |
-| `accounts/personal/zones/zone-002` | `.private/zone-002.tfvars` | `.private/zone-002.backend.hcl` |
-| `accounts/personal/zones/zone-003` | `.private/zone-003.tfvars` | `.private/zone-003.backend.hcl` |
-| `accounts/personal/r2` | `.private/personal-r2.tfvars` | `.private/personal-r2.backend.hcl` |
-| `accounts/personal/workers` | `.private/personal-workers.tfvars` | `.private/personal-workers.backend.hcl` |
-| `accounts/personal/backend` | `.private/personal-backend.tfvars` | `.private/personal-backend.backend.hcl` |
-
-`.backend.hcl` にはバケット名、保存キー、エンドポイント、R2 互換設定を置きます。認証キーは環境変数で渡します。各 root の保存キーを重複させないでください。`use_lockfile = true` により、同じ state に対する同時操作を防ぎます。
-
-## 検証と取り込み
-
-Zone の操作例です。リポジトリルートから実行します。
+`apply` を指定すると、同じ処理で plan を作成・検査してから、その保存済み plan を適用します。任意の Terraform オプションや未知のターゲットは受け付けません。
 
 ```sh
-terraform -chdir=accounts/personal/zones/zone-001 init -input=false \
-  -backend-config=../../../../.private/zone-001.backend.hcl
-terraform -chdir=accounts/personal/zones/zone-001 validate
-terraform -chdir=accounts/personal/zones/zone-001 plan -input=false \
-  -var-file=../../../../.private/zone-001.tfvars \
-  -out=../../../../.private/zone-001.tfplan
+./scripts/tf.sh zone-001 apply
 ```
 
-R2、Workers、backend のディレクトリから `.private/` への相対パスは `../../../.private/` です。R2 の操作例は次のとおりです。
+通常出力は固定の状態のみです。詳細ログ、設定の一時ファイル、保存した plan は `.private/runtime/` に置きます。アクセス権はディレクトリ `700`、ファイル `600` とし、公開しないでください。CI はローカル端末の `.private/` を参照しません。
 
-```sh
-terraform -chdir=accounts/personal/r2 init -input=false \
-  -backend-config=../../../.private/personal-r2.backend.hcl
-terraform -chdir=accounts/personal/r2 plan -input=false \
-  -var-file=../../../.private/personal-r2.tfvars \
-  -out=../../../.private/personal-r2.tfplan
-```
-
-`plan` は取り込みや設定変更を適用しません。既存設定との一致、Secret の保持、削除や置き換えがないことを確認してから、対象 root で保存した plan を適用します。
-
-```sh
-terraform -chdir=accounts/personal/zones/zone-001 apply \
-  ../../../../.private/zone-001.tfplan
-```
-
-Provider の制約により、R2 の公開設定、ライフサイクル、CORS は import できません。既存設定を再現していても、初回 plan では追加として表示されます。Worker も、ソースのパスやハッシュ、Cron の取り込み状態により、初回に更新が表示される場合があります。
-
-## 型と入力検証
-
-R2 と Worker の設定は `map(object(...))` で定義しています。ID の形式、R2 のリージョンと管轄、ローカル Worker キーの参照先などを `validation` で検証します。
-
-R2 の公開は、同じバケットに `public_access_enabled = true` と `allow_public_access = true` の両方を指定した場合だけ許可します。state 専用バケットの公開は許可しません。
-
-Zone 設定の値は `value_json`、ルールセットの可変のルール配列は `rules_json` に JSON 文字列として渡します。メタデータは明示した型で検証し、JSON は構文を検証してから Provider に渡します。DNS の `data.flags` だけは、Provider が動的型を要求するため `any` を使用します。
-
-Worker の `source_path` には非公開ソースの絶対パスを指定します。Secret の値は Terraform 入力に含めず、`preserve_binding_types` で既存の Secret を保持します。`secret_names` は値を含まない確認用の一覧です。Cron、ルート、カスタムドメインは `worker_key` で同じ root の Worker を参照します。
-
-Zone 内の DNS、設定、ルールセットはモジュール内部でその Zone を参照するため、別の Zone のキーを入力する必要はありません。Cloudflare の managed ruleset 本体は管理しません。
-
-## テスト
-
-全体のフォーマットと、認証情報を使用しない Zone モジュールの入力検証テストを実行できます。
+## 検証と初回取り込み
 
 ```sh
 terraform fmt -check -recursive
+node --test .github/scripts/control.test.cjs
 terraform -chdir=modules/zone init -backend=false -input=false
 terraform -chdir=modules/zone test
-terraform -chdir=accounts/personal/backend test
+terraform -chdir=bootstrap/backend init -backend=false -input=false
+terraform -chdir=bootstrap/backend test
 ```
 
-各 root の `validate` と非公開設定を使った `plan` も、変更した単位で実行してください。
+各 stack には Provider lock ファイルを置き、Provider を固定します。R2 と Worker の入力は使用する機能に合わせた `map(object(...))` で定義し、ID、リージョン、参照先、公開設定を検証します。Worker は Terraform で引き続き管理し、既存の Secret を保持します。
 
-## State と復旧
+`imports.tf` は未取り込みの既存リソースのために残しています。取り込みと各ターゲットの plan 照合が完了した後に削除できます。取り込み前に削除すると、新規作成として扱われるため削除しないでください。
 
-state は専用の非公開 R2 バケットに保管します。backend を管理する root 自身の state も、バケット作成後に同じ専用バケットへ移します。専用バケットには `prevent_destroy` を設定しています。
+R2 の公開設定、ライフサイクル、CORS は固定 Provider で import 非対応です。初回に追加として表示されても、既存設定 API への書き込みである場合があります。初回の差分は非公開環境で確認してください。
 
-専用バケットがまだ存在しない初回だけは、backend root を一時的に local backend で実行し、バケット作成後に S3 backend へ戻して `terraform init -migrate-state` で移行します。既存 backend の再初期化や復旧時に、バケットを重複作成しないでください。
+## Bootstrap と復旧
 
-R2 は S3 のバージョニング API に対応していません。`.env`、`.tfvars`、`.backend.hcl`、Worker ソース、state のスナップショットは、暗号化とアクセス制御のある別の非公開ストレージへバックアップしてください。ロックファイルを保管期限付きの bucket lock で固定すると Terraform のロック解除を妨げるため、設定しないでください。
+`bootstrap/backend` は日常の CI 対象に含めません。State と Config バケットの初期作成や復旧にだけ使います。既存の bootstrap state とバケットを二重作成せず、専用の非公開設定と既存キーを使って操作してください。
 
-Terraform の出力、state、保存した plan、`terraform show -json` の結果、デバッグログには本番の情報が含まれます。公開せずに扱ってください。リポジトリを clone しただけでは、本番の値を復元できません。
+R2 に S3 のバージョニング機能はないため、state、bootstrap の復旧情報、認証情報のバックアップは別の非公開ストレージへ保管します。設定値の通常運用には R2 のリビジョンを使い、端末上の移行元ファイルはバックアップとしてのみ扱います。
 
 ## 参考資料
 
 - [Terraform 設計ガイドライン](https://future-architect.github.io/arch-guidelines/documents/forTerraform/terraform_guidelines.html)
-- [Cloudflare の R2 backend](https://developers.cloudflare.com/terraform/advanced-topics/remote-backend/)
+- [Cloudflare R2 backend](https://developers.cloudflare.com/terraform/advanced-topics/remote-backend/)
 - [Terraform S3 backend](https://developer.hashicorp.com/terraform/language/backend/s3)
-- [Terraform の機密情報の管理](https://developer.hashicorp.com/terraform/language/manage-sensitive-data)
-- [R2 の S3 互換 API](https://developers.cloudflare.com/r2/api/s3/api/)
+- [GitHub Actions の実行イベント](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)

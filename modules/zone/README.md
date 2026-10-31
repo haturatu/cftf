@@ -14,4 +14,4 @@
 
 `settings.value_json` は JSON として有効かつ非 null の値を指定します。`rulesets.rules_json` は JSON 配列を指定します。DNS の `data.flags` は Provider の動的型に合わせています。
 
-使用例は `accounts/personal/zones/zone-001`、値を含まない設定例は `examples/zone.tfvars.example` を参照してください。
+使用例は `stacks/zone`、値を含まない設定例は `examples/zone.tfvars.json.example` を参照してください。

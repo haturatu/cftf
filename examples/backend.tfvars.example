@@ -3,3 +3,9 @@ bucket_name           = "REPLACE_WITH_PRIVATE_STATE_BUCKET"
 location              = "REPLACE_WITH_LOCATION"
 jurisdiction          = "REPLACE_WITH_JURISDICTION"
 public_access_enabled = false
+config_bucket = {
+  name                  = "REPLACE_WITH_PRIVATE_CONFIG_BUCKET"
+  location              = "REPLACE_WITH_LOCATION"
+  jurisdiction          = "REPLACE_WITH_JURISDICTION"
+  public_access_enabled = false
+}
