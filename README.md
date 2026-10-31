@@ -77,6 +77,12 @@ Config 取得用キーは読み取り専用、State 用キーはそのバケッ�
 
 `.env.example` にある標準名で認証情報と承認済みの R2 リビジョンを設定し、リポジトリルートから読み込みます。既存の `.env` は上書きしないでください。
 
+ローカルの操作は、基本的に `terraform` のラッパーシェル経由で操作します。  
+```sh
+$ ./scripts/tf.sh
+ERROR: usage: scripts/tf.sh <approved-target> <plan|apply>
+```
+
 ```sh
 umask 077
 set -a
