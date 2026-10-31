@@ -68,79 +68,16 @@ variable "workers" {
   description = "Private Worker definitions; source paths are absolute and Secret values stay in Cloudflare."
   type = map(object({
     bindings = list(object({
-      algorithm                     = optional(string)
-      allowed_destination_addresses = optional(list(string))
-      allowed_sender_addresses      = optional(list(string))
-      app_id                        = optional(string)
-      bucket_name                   = optional(string)
-      certificate_id                = optional(string)
-      class_name                    = optional(string)
-      database_id                   = optional(string)
-      dataset                       = optional(string)
-      destination_address           = optional(string)
-      dispatch_namespace            = optional(string)
-      entrypoint                    = optional(string)
-      environment                   = optional(string)
-      format                        = optional(string)
-      id                            = optional(string)
-      index_name                    = optional(string)
-      instance_name                 = optional(string)
-      json                          = optional(string)
-      jurisdiction                  = optional(string)
-      key_base64                    = optional(string)
-      key_jwk                       = optional(string)
-      name                          = string
-      namespace                     = optional(string)
-      namespace_id                  = optional(string)
-      network_id                    = optional(string)
-      old_name                      = optional(string)
-      outbound = optional(object({
-        params = optional(list(string))
-        worker = optional(object({
-          environment = optional(string)
-          service     = optional(string)
-        }))
-      }))
-      part       = optional(string)
-      pipeline   = optional(string)
-      queue_name = optional(string)
-      retry = optional(object({
-        max_attempts = optional(number)
-        timeout_ms   = optional(number)
-      }))
-      script_name = optional(string)
-      secret_name = optional(string)
-      service     = optional(string)
-      service_id  = optional(string)
-      simple = optional(object({
-        limit              = number
-        mitigation_timeout = optional(number)
-        period             = number
-      }))
-      store_id      = optional(string)
-      stream        = optional(string)
-      text          = optional(string)
-      tunnel_id     = optional(string)
-      type          = string
-      usages        = optional(set(string))
-      version_id    = optional(string)
-      workflow_name = optional(string)
+      name = string
+      type = string
+      text = string
     }))
     body_part           = optional(string)
     compatibility_date  = string
     compatibility_flags = set(string)
-    files = optional(map(object({
-      content_base64 = optional(string)
-      content_file   = optional(string)
-      content_type   = string
-    })))
-    limits = optional(object({
-      cpu_ms      = optional(number)
-      subrequests = optional(number)
-    }))
-    logpush     = bool
-    main_module = optional(string)
-    name        = string
+    logpush             = bool
+    main_module         = optional(string)
+    name                = string
     observability = optional(object({
       enabled            = bool
       head_sampling_rate = optional(number)
@@ -162,19 +99,11 @@ variable "workers" {
         propagation_policy = optional(string)
       }))
     }))
-    placement = optional(object({
-      mode = optional(string)
-    }))
     preserve_binding_types = set(string)
     secret_names           = optional(set(string), [])
     source_path            = string
     subdomain              = object({ enabled = bool, previews_enabled = bool })
-    tail_consumers = set(object({
-      environment = optional(string)
-      namespace   = optional(string)
-      service     = string
-    }))
-    usage_model = string
+    usage_model            = string
   }))
   nullable = false
   validation {
@@ -194,7 +123,7 @@ variable "workers" {
     error_message = "Existing Secret names require preserving the secret_text binding type."
   }
   validation {
-    condition     = alltrue(flatten([for worker in values(var.workers) : [for binding in worker.bindings : !contains(["secret_text", "secret_key"], binding.type)]]))
-    error_message = "Manage Secret values outside Terraform and preserve existing Secret binding types."
+    condition     = alltrue(flatten([for worker in values(var.workers) : [for binding in worker.bindings : binding.type == "plain_text"]]))
+    error_message = "Only current plain_text bindings are supported; keep Secret values outside Terraform."
   }
 }

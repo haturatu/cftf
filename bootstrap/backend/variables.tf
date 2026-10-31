@@ -25,6 +25,37 @@ variable "jurisdiction" {
   }
 }
 
+variable "config_bucket" {
+  description = "A separate private R2 bucket for revisioned configuration and Worker sources."
+  type = object({
+    name                  = string
+    location              = string
+    jurisdiction          = string
+    public_access_enabled = bool
+  })
+  nullable = false
+
+  validation {
+    condition     = var.config_bucket.public_access_enabled == false
+    error_message = "Public access is forbidden for the configuration bucket."
+  }
+
+  validation {
+    condition     = contains(["apac", "eeur", "enam", "weur", "wnam", "oc"], var.config_bucket.location)
+    error_message = "Specify a supported configuration bucket location."
+  }
+
+  validation {
+    condition     = contains(["default", "eu", "fedramp", "us"], var.config_bucket.jurisdiction)
+    error_message = "Specify a supported configuration bucket jurisdiction."
+  }
+
+  validation {
+    condition     = var.config_bucket.name != var.bucket_name
+    error_message = "Configuration and state must use separate buckets."
+  }
+}
+
 variable "location" {
   description = "Private dedicated state bucket property."
   type        = string

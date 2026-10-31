@@ -7,7 +7,6 @@ resource "cloudflare_workers_script" "managed" {
   content_sha256      = filesha256(each.value.source_path)
   main_module         = each.value.main_module
   body_part           = each.value.body_part
-  files               = each.value.files
   bindings            = each.value.bindings
   keep_bindings       = each.value.preserve_binding_types
   compatibility_date  = each.value.compatibility_date
@@ -15,9 +14,6 @@ resource "cloudflare_workers_script" "managed" {
   usage_model         = each.value.usage_model
   logpush             = each.value.logpush
   observability       = each.value.observability
-  limits              = each.value.limits
-  placement           = each.value.placement
-  tail_consumers      = each.value.tail_consumers
 
   lifecycle {
     prevent_destroy = true
