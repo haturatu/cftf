@@ -10,8 +10,11 @@
 plan.json
 *.tfvars
 *.tfvars.json
+*.backend.hcl
 !*.tfvars.example
 !*.tfvars.json.example
+!*.backend.hcl.example
+/modules/**/.terraform.lock.hcl
 *.log
 *.log.*
 .terraform.tfstate.lock.info
