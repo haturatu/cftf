@@ -134,12 +134,12 @@ GitHub API はモックし、ネットワーク接続なしで承認、マージ
 
 依存関係としてシェルの静的解析には `shellcheck`、Workflow の検証には `actionlint` を使います。
 
-### インストール
+### Setup
 ```sh
 sudo pacman -S --needed shellcheck shfmt actionlint
 ```
 
-### テスト
+### Tests
 ```sh
 terraform fmt -check -recursive
 .github/scripts/control.test.sh
