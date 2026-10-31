@@ -82,6 +82,14 @@ sudo pacman -S --needed \
 
 Terraform は CI と同じ `1.15.9` を使います。`gh` コマンドのパッケージ名は `github-cli` です。
 
+Bash の Tab 補完は次のコマンドで有効にします。次回以降も使う場合は、このファイルを絶対パスで読み込む行を `~/.bashrc` に追加してください。
+
+```bash
+source ./scripts/tf-completion.bash
+```
+
+`./scripts/tf.sh <Tab>` のターゲット候補は、補完のたびに Private 側の `deployment/config.json` から取得します。取得に認証情報や R2 への接続は不要です。許可リストを編集すると再読み込みなしで反映されます。2 つ目の引数は `plan` と `apply` を補完します。Private 側の配置を変更する場合は、補完前に `CFTF_DEPLOY_DIR` を export してください。
+
 手動実行も、Private 側の共通処理を呼び出して R2 から設定を取得します。隣接する `cftf-deploy` の checkout と、その仮想環境を準備してください。配置が異なる場合は `CFTF_DEPLOY_DIR` と `CFTF_DEPLOY_PYTHON` を指定します。
 
 `.env.example` にある標準名で認証情報と承認済みの R2 リビジョンを設定し、リポジトリルートから読み込みます。既存の `.env` は上書きしないでください。
@@ -118,13 +126,15 @@ set +a
 シェルの静的解析には `shellcheck`、Workflow の検証には `actionlint` を使います。
 
 ```sh
-sudo pacman -S --needed shellcheck actionlint
+sudo pacman -S --needed shellcheck shfmt actionlint
 ```
 
 ```sh
 terraform fmt -check -recursive
 .github/scripts/control.test.sh
-shellcheck scripts/tf.sh .github/scripts/control.sh .github/scripts/control.test.sh
+./scripts/tf.test.sh
+shellcheck -x scripts/*.sh scripts/*.bash .github/scripts/*.sh
+shfmt -d -i 2 -ci -sr scripts/*.sh scripts/*.bash .github/scripts/*.sh
 terraform -chdir=modules/zone init -backend=false -input=false
 terraform -chdir=modules/zone test
 terraform -chdir=bootstrap/backend init -backend=false -input=false

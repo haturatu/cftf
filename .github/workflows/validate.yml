@@ -28,6 +28,7 @@ jobs:
           set -euo pipefail
           terraform fmt -check -recursive
           .github/scripts/control.test.sh
+          ./scripts/tf.test.sh
           for root in stacks/zone stacks/r2 stacks/workers bootstrap/backend; do
             terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly
             terraform -chdir="$root" validate
