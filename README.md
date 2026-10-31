@@ -148,6 +148,10 @@ actionlint -ignore 'unexpected key "queue" for "concurrency" section' \
   .github/workflows/*.yml
 ```
 
+[Dependabot の設定](.github/dependabot.yml)は、GitHub Actions と Terraform Provider の通常のバージョン更新を毎月 1 日の日本時間 09:00 に確認します。種類ごとに更新をまとめ、未処理の更新 PR は各 1 件に制限します。更新 PR は通常のレビューで扱います。セキュリティ更新の有効化状態は変更せず、その更新頻度はこの月次設定とは別です。
+
+Provider 更新時は、Private 側の `deployment/config.json` の `provider_version` と `trust/cloudflare.lock.hcl` も更新して整合性を確認します。Terraform CLI のバージョンは、両リポジトリの Workflow と Private 側の設定を手動で揃えます。
+
 各 stack には Provider lock ファイルを置き、Provider を固定します。R2 と Worker の入力は使用する機能に合わせた `map(object(...))` で定義し、ID、リージョン、参照先、公開設定を検証します。Worker は Terraform で引き続き管理し、既存の Secret を保持します。
 
 `imports.tf` は未取り込みの既存リソースのために残しています。取り込みと各ターゲットの plan 照合が完了した後に削除できます。取り込み前に削除すると、新規作成として扱われるため削除しないでください。
