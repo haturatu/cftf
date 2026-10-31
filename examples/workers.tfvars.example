@@ -1,0 +1,5 @@
+account_id     = "REPLACE_WITH_ACCOUNT_ID"
+workers        = {}
+worker_crons   = {}
+worker_routes  = {}
+worker_domains = {}

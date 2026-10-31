@@ -1,0 +1,5 @@
+account_id            = "REPLACE_WITH_ACCOUNT_ID"
+bucket_name           = "REPLACE_WITH_PRIVATE_STATE_BUCKET"
+location              = "REPLACE_WITH_LOCATION"
+jurisdiction          = "REPLACE_WITH_JURISDICTION"
+public_access_enabled = false
