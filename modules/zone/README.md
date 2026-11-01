@@ -1,58 +1,56 @@
 # Zone モジュール
 
-`modules/zone` は、Cloudflare の **既存の一つの Zone** に対して、DNS、Zone 設定、Ruleset、Bot 対策、TLS、DNSSEC、各種セキュリティ機能を Terraform で管理するモジュールです。
+`modules/zone` は、Cloudflare の Zone にある DNS、WAF、Bot 対策、TLS などを共通化したモジュールです。
 
-本モジュールは **state と backend を管理しません**。実際の Zone の取り込みには `stacks/zone` を使用し、Zone ごとの非公開設定と、個別の state キーを渡します。
+Zone ごとに同じリソース定義を書くのは面倒なので、Terraform のコードは一つにして、実際の ID やルールだけ切り替える形にしています。
 
-**重要:** 実際の Zone 名、Zone / Account ID、DNS レコード、Ruleset ID は公開コードへ書き込まないでください。入力例にはプレースホルダーだけを使用してください。plan や state には実値が含まれるため、公開しないでください。
+ただし、このモジュール自体は state を管理しません。実行するのは `stacks/zone` です。既存の Zone を import する仕組みや、ターゲットごとの state の分離もそちらに置いています。
 
-## 入力の構成
+## 何を設定できるのか
 
-| 入力 | 型 | 内容 |
-| --- | --- | --- |
-| `account_id` | `string` | Cloudflare Account ID |
-| `zone` | `object` | 既存 Zone の ID、名前、種類、停止状態 |
-| `dns_records` | `map(object)` | Zone の DNS レコード |
-| `settings` | `map(object)` | TLS などの Zone 設定 |
-| `rulesets` | `map(object)` | ユーザーが管理する Zone Phase のルールセット |
-| `managed_entrypoints` | `map(object)` | Cloudflare 管理ルールを実行する Zone Phase のエントリーポイント |
-| `existing_zone_ruleset_phases` | `set(string)` | 既存 Phase。重複作成の防止に使用 |
-| `bot_management` | `object` | Bot Fight Mode、AI クローラー対策、管理 robots.txt |
-| `url_normalization` | `object` | URL の正規化 |
-| `dnssec` | `object` | DNSSEC の状態 |
-| `managed_transforms` | `object` | セキュリティヘッダー等 |
-| `leaked_credential_check` | `bool` | 漏洩資格情報の検査 |
-| `authenticated_origin_pulls` | `bool` | Cloudflare からオリジンへの認証 |
-| `access_rules` | `map(object)` | IP / ASN / 国のアクセス制御 |
-| `user_agent_blocking_rules` | `map(object)` | User-Agent に基づくアクセス制御 |
+| 入力 | 内容 |
+| --- | --- |
+| `account_id` / `zone` | Account ID と既存 Zone の情報 |
+| `dns_records` | DNS レコード |
+| `settings` | HTTPS や TLS などの Zone 設定 |
+| `rulesets` | 自分で作る WAF、Rate Limiting などの Ruleset |
+| `managed_entrypoints` | Cloudflare 管理 Ruleset を実行する Phase の設定 |
+| `existing_zone_ruleset_phases` | 既存 Phase の重複作成を防ぐための情報 |
+| `bot_management` | Bot Fight Mode、AI クローラー対策、robots.txt |
+| `url_normalization` / `dnssec` | URL 正規化と DNSSEC |
+| `managed_transforms` | セキュリティヘッダーなどの変換 |
+| `leaked_credential_check` | 漏洩資格情報の検知 |
+| `authenticated_origin_pulls` | Cloudflare とオリジン間の認証 |
+| `access_rules` | IP、ASN、国によるアクセス制御 |
+| `user_agent_blocking_rules` | User-Agent による遮断 |
 
-各 `map` のキーには、`custom`、`rate_limit` などの**安定したローカル名**を使用します。ドメイン名や実 ID を含めないでください。正確な型、許容値、件数制限は [variables.tf](variables.tf) を参照してください。
+詳しい型や許容値は [variables.tf](variables.tf) にあります。`rulesets` などのマップキーは `custom` といったローカルの名前にして、実際のドメインや ID を含めないようにしています。
 
-`web_baseline` は **モジュールの入力ではなく、呼び出し元の `stacks/zone` の入力**です。`stacks/zone/locals.tf` で標準の TLS / HTTPS / BIC 設定へ変換したうえで、本モジュールの `settings` などに渡されます。
+なお、`web_baseline` はこのモジュールの変数ではなく、`stacks/zone` 側の変数です。`stacks/zone/locals.tf` で TLS などの設定に変換してから、このモジュールへ渡します。
 
-## 既存 Zone の管理を始める
+## 既存 Zone を取り込む
 
-1. Private 側の許可リストで、対象 Zone の匿名ターゲットと正しい state キーを確認します。
-2. [Zone の入力例](../../examples/zone.tfvars.json.example)を参考に、実 ID と設定を非公開の `tfvars.json` に定義します。
-3. 既存 DNS、Ruleset、Access Rule には正しい ID を指定します。`stacks/zone/imports.tf` は、ID を持つ既存リソースを import します。
-4. Private 側で plan を作成し、**意図しない作成・削除・更新のないこと**を確認します。
-5. 既存設定と Terraform の差分が理解できてから apply します。
+このリポジトリは、新しく Zone を量産するよりも**すでにある Cloudflare の設定を Terraform 管理へ移す**ことを想定しています。
 
-実際の操作は [トップレベル README](../../README.md#設定を-plan--apply-する) を参照してください。
+手順としては以下のようになります。
 
-**注意:** `terraform init -reconfigure` は state の移行ではありません。初期取り込みで state キーを誤ると、既存リソースが存在しないように見えて、新規作成や削除を計画する場合があります。
+1. Private 側で対象の匿名ターゲットと state キーを確認する。
+2. [入力例](../../examples/zone.tfvars.json.example)を参考に、既存 Zone、DNS、Ruleset の ID を非公開の tfvars に設定する。
+3. `stacks/zone/imports.tf` で既存リソースを取り込む。
+4. まず plan を確認し、元の設定を勝手に変更しようとしていないことを確認する。
+5. 問題なければ Private 側で apply する。
 
-## Zone 設定と DNS
+`terraform init -reconfigure` を state 移行と勘違いしないようにしてください。backend を初期化し直すだけです。間違った state キーを参照すると、存在するリソースが新規作成扱いになることがあります。
 
-### DNS レコード
+実行コマンドは [トップレベル README](../../README.md#plan-と-apply) にまとめています。
 
-`dns_records` には、この Zone で Terraform が所有する DNS レコードを指定します。既存レコードでは `id` を含めます。`stacks/zone/imports.tf` は `<zone_id>/<record_id>` 形式で取り込みます。
+## DNS と Zone 設定
 
-Cloudflare の **Proxied** が無効な DNS Only レコードのトラフィックは、Cloudflare HTTP WAF の保護を通りません。DNS を切り替える前に接続経路とオリジンの公開状態を確認してください。
+`dns_records` に既存レコードを入れる場合は `id` も指定します。import ID は `<zone_id>/<record_id>` 形式です。
 
-### Zone 設定
+Cloudflare の HTTP WAF を使いたい場合、レコードが **Proxied** になっていることも確認してください。DNS Only だと HTTP リクエストは Cloudflare の WAF を通りません。
 
-`settings` の各項目には `setting_id` と `value_json` を指定します。`value_json` は**JSON として有効な非 null 文字列**でなければなりません。同じ `setting_id` の重複は拒否されます。
+TLS などは `settings` で設定します。
 
 ```hcl
 settings = {
@@ -67,91 +65,83 @@ settings = {
 }
 ```
 
-この例は、HCL で表現した**モジュール入力の一部**です。実際に R2 に保管する場合は、Terraform の `tfvars.json` 形式に変換して他の必須項目と合わせます。
+`value_json` は JSON として有効な文字列でなければならず、同じ `setting_id` を二重に指定することもできません。
 
-`web_baseline` を使用する場合、呼び出し元が `ssl=strict`、`always_use_https=on`、`min_tls_version=1.2`、`tls_1_3=on`、`browser_check=on` を管理します。既存の `settings` に同じ `setting_id` があっても、ベースライン値が優先されます。
+このコードは HCL の書き方を示したものです。R2 に保存する設定は `tfvars.json` の形式にします。
 
 ### URL Normalization と DNSSEC
 
-`url_normalization` の `scope` は `incoming` / `both` / `none`、`type` は `cloudflare` / `rfc3986` に対応します。利用には対象 Zone の API 機能と Zone の `Sanitize Read` / `Sanitize Write` 権限が必要です。認可されていない場合は 403 になります。
+URL Normalization の `scope` は `incoming`、`both`、`none`、`type` は `cloudflare` または `rfc3986` を指定できます。
 
-`dnssec` は `status = "active"` または `"disabled"` を指定します。Cloudflare 側で有効にした後は、返された DS レコードをレジストラに設定し、`dig +dnssec` で信頼チェーンを確認してください。
+ただし Cloudflare 側のプランや Zone によって使えるかが変わります。API の `Sanitize Read` / `Sanitize Write` 権限がない場合も失敗します。
 
-## WAF とルールセット
+DNSSEC は `status = "active"` で有効にできますが、Cloudflare 側だけで終わりではありません。返された DS レコードをレジストラへ登録し、`dig +dnssec` などで実際に検証してください。
+
+## WAF は Ruleset の所有権に注意
 
 ### Custom Rules と Rate Limiting
 
-`rulesets` は、利用者が所有する Zone エントリーポイントを定義します。`kind = "zone"` を使用し、既存リソースならその Ruleset ID を `id` に指定します。`id` がない場合は新規作成の対象になります。
+`rulesets` では `kind = "zone"` の Ruleset を定義します。既存のものを管理するなら `id` を指定し、新しく作るなら省略します。
 
-`rules_json` にはルールの **JSON 配列**を格納します。同じ Zone の同じ Phase を複数のルールセットで管理することはできません。
+`rules_json` は JSON の配列です。Free プランで代表的な制限は以下です。
 
-Free プランに合わせた代表的な制限:
-
-| Phase | 制限 |
+| 種類 | 制限 |
 | --- | --- |
-| `http_request_firewall_custom` | 5 ルール / Zone |
-| `http_ratelimit` | 1 ルール / Zone。`period = 10` 秒 |
-| `http_ratelimit` の `characteristics` | `cf.colo.id` を含める |
-| Rate Limit の `block` / `log` | `mitigation_timeout = 10` |
-| Rate Limit のチャレンジ系 | `mitigation_timeout = 0`（request throttling） |
+| Custom WAF | 5 ルール / Zone |
+| Rate Limiting | 1 ルール / Zone、`period = 10` |
+| Rate Limiting の `characteristics` | `cf.colo.id` が必要 |
+| `block` / `log` | `mitigation_timeout = 10` |
+| チャレンジ系 | `mitigation_timeout = 0` |
 
-**注意:** 件数は、Cloudflare の Zone / Phase にすでに存在するルールも含めて確認します。モジュールの validation は設定値の形式と一部の上限を検証しますが、別の Terraform state の所有権までは判定できません。
+Cloudflare 側に既存のルールがあっても上限に含まれます。Terraform 側に 1 件しか書いていないから安全、というわけではありません。
 
-HCL の例と、実際に採用する場合の注意点は [トップレベル README の WAF 設定](../../README.md#waf-custom-rules)を参照してください。
+実際の HCL の例は [README の WAF 設定](../../README.md#waf-custom-rules) を参照してください。
 
-### Managed Ruleset の実行設定
+### Free Managed Ruleset を消さない
 
-`http_request_firewall_managed` / `http_response_firewall_managed` / `ddos_l7` は、通常の `rulesets` では拒否します。このモジュールの `managed_entrypoints` が対応するのは **`http_request_firewall_managed` と `ddos_l7`** の Zone エントリーポイントです。`http_response_firewall_managed` をここで管理することはできません。
+少し厄介なのが Managed Ruleset です。Cloudflare が自動で適用しているものを、Terraform から空の Ruleset で上書きすると保護を消してしまう可能性があります。
 
-`managed_entrypoints.id` は **管理ルールセット本体の ID ではなく、Zone Phase エントリーポイントの ID** です。`rules_json` には少なくとも一つの有効な `execute` ルール（`expression` と32桁の `action_parameters.id` を持つ）を含めます。
+そのため `http_request_firewall_managed` と `ddos_l7` は `managed_entrypoints` で別に扱っています。`http_response_firewall_managed` をここで管理することはできません。
 
-次のような入力は validation が拒否します。
+`managed_entrypoints.id` は**管理 Ruleset 本体ではなく、Zone Phase のエントリーポイントの ID** です。`rules_json` には有効な `execute` ルールと、`action_parameters.id` に管理 Ruleset の ID が必要です。
 
-- 空のルール配列
-- 有効な `execute` ルールが存在しない配列
-- 無条件の `skip`（`expression = "true"`）
+空配列、有効な `execute` の欠落、無条件の `skip` は validation で拒否しています。とはいえチェックだけに頼らず、既存 Phase を import して無変更の plan を確認してから触る方が安全です。
 
-Free Managed Ruleset と HTTP DDoS Protection は Cloudflare が自動適用するため、通常は明示的な設定を追加しないでください。変更が必要なら、既存 Phase を import し、まず無変更 plan を確認してください。
+### 同じ Phase を二つの state で管理しない
 
-### Phase の重複を防ぐ
+例えば `stacks/f2b` は API 向けの `http_request_firewall_custom` を所有しています。そこへ `stacks/zone` でも同じ Phase を作ると、どちらが正しい設定なのか分からなくなります。
 
-`existing_zone_ruleset_phases` は Cloudflare 側にすでに存在する Zone Phase です。呼び出し元 `stacks/zone` が `cloudflare_rulesets` データソースから設定します。`id` のない新規エントリーポイントが既存 Phase と重複する場合は拒否します。
+`existing_zone_ruleset_phases` は Cloudflare の既存 Phase を確認して重複作成を拒否するためのものですが、**別 state の所有権までは検出できません**。
 
-ただし、この検査は別の Terraform state の**所有権**を検出するものではありません。`stacks/f2b` と `stacks/zone` の間で `http_request_firewall_custom` の管理を移す場合は、両方の自動 apply を停止し、旧 state から実体を削除せずに外してから新 state へ import してください。
+管理先を移す場合は両方の自動 apply を止め、旧 state から実リソースを削除せずに外して、新 state で import します。手順は [README の所有権移行](../../README.md#同じ-ruleset-を二つの-state-で管理しない)を参照してください。
 
-[所有権移行の手順](../../README.md#同じ-phase-の所有権を分離する)を参照してください。
+## Bot 対策と TLS
 
-## Bot、TLS、ヘッダー
+`bot_management` には Bot Fight Mode のほか、`ai_bots_protection`、`crawler_protection`、`is_robots_txt_managed` などがあります。
 
-`bot_management` は、値を指定した場合だけ設定します。主なフィールドは `fight_mode`、`ai_bots_protection`、`crawler_protection`、`is_robots_txt_managed`、`ai_training`、`ai_user`、`aisearch` です。
+ただ、Bot Fight Mode を全部の Zone で有効にすればよいわけではありません。API クライアントもチャレンジされる可能性があり、WAF Custom Rules の Skip では除外できません。
 
-**Bot Fight Mode は WAF Custom Rules の Skip では除外できません。** API やモバイルクライアントが利用する Zone で有効にすると、正常な通信をチャレンジする場合があります。
+`managed_transforms` ではセキュリティヘッダーなどを設定できます。`leaked_credential_check` と `add_waf_credential_check_status_header` を組み合わせる場合も、必要な Transform を明示します。
 
-`managed_transforms` は `request_headers` / `response_headers` に、Transform ID と `enabled` を指定します。空の設定は validation で拒否します。`leaked_credential_check` は `add_waf_credential_check_status_header` との併用を検討してください。
+`authenticated_origin_pulls` を有効にするときは、オリジン側の証明書と検証設定も必要です。Cloudflare 側だけ設定しても、保護が完成するわけではありません。
 
-`authenticated_origin_pulls` は、オリジン側の証明書と検証設定がすでに用意されている場合だけ有効にします。Cloudflare 側の設定だけではオリジンを保護できません。
+## IP / User-Agent による制御
 
-## IP / User-Agent アクセスルール
+`access_rules` は IP、ASN、国など、`user_agent_blocking_rules` は User-Agent の条件を管理します。
 
-`access_rules` は IP、IPv6、CIDR、ASN、国などのターゲットを管理します。`user_agent_blocking_rules` は User-Agent に基づくルールです。いずれも既存リソースなら正しい `id` を指定して import します。
+既存ルールには `id` を指定してください。Free の User-Agent Blocking は Zone ごとに 10 件までです。
 
-Free プランの User-Agent Blocking は 10 ルール / Zone です。`mode` は `block`、`challenge`、`whitelist`、`js_challenge`、`managed_challenge` など、モジュールで検証する値から指定してください。
+User-Agent は誰でも変更できるので、これを認証の代わりに使うのは無理があります。単独の遮断条件にする場合も誤検知には注意してください。
 
-**注意:** User-Agent はクライアントが任意に変更できます。これだけで認証や確実な攻撃者識別を行わないでください。
-
-## 検証と関連資料
-
-認証情報を使用せず、モジュールの validation と Terraform テストを実行できます。
+## テスト
 
 ```sh
 terraform -chdir=modules/zone init -backend=false -input=false
 terraform -chdir=modules/zone test
 ```
 
-このテストは実在する Cloudflare API の権限や全ルールの実行結果を検査しません。**本番への apply 前には Private 側で plan を確認する必要があります。**
+これで入力値などを検査できますが、実際の Cloudflare API の権限や現在の既存ルールまでは確認できません。apply 前には Private 側で plan を見てください。
 
-- [運用・セキュリティ設定の全体像](../../README.md)
+- [トップレベル README](../../README.md)
 - [Zone の入力例](../../examples/zone.tfvars.json.example)
-- [Zone stack の import 定義](../../stacks/zone/imports.tf)
-- [Cloudflare WAF のプラン別機能](https://developers.cloudflare.com/waf/)
-- [Cloudflare Bot Fight Mode](https://developers.cloudflare.com/bots/get-started/bot-fight-mode/)
+- [import の定義](../../stacks/zone/imports.tf)

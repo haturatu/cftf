@@ -1,84 +1,91 @@
-# Cloudflare の Terraform 管理
+# cftf
 
-cftf は、Cloudflare の Zone、DNS、WAF、Bot 対策、R2、Workers などの設定を Terraform で管理するための公開リポジトリです。**Terraform のコードと実際の設定値を分離する**ことを前提としています。
+Cloudflare の DNS、WAF、Bot 対策、R2、Workers などを Terraform で管理するためのリポジトリです。
 
-- Terraform の定義と非機密の検証処理は、このリポジトリで管理します。
-- Zone 名、Zone / Account ID、DNS レコード、認証情報、Worker のソースなどの実値は、非公開 R2 の **Config バケット**に保管します。
-- Terraform state は、Config とは別の非公開 **State バケット**に保管します。
-- 本番の plan / apply と、その結果の詳細な検査は非公開のデプロイリポジトリで実行します。公開側に plan 本文や実リソースの情報は返しません。
+Cloudflare のダッシュボードで設定するのも悪くないのですが、Zone が増えてくると「何をどこで変更したのか」が分かりづらくなります。同じ設定を複数の Zone に入れるのも面倒です。
 
-公開のコードだけで本番環境を再構成できる仕組みではありません。非公開の設定、既存 state、バックアップ、実行権限が揃って初めて運用できます。
+なので、まとめて Terraform で管理することにしました。
 
-**重要:** Terraform の `sensitive` は通常の CLI 表示を抑制するための指定であり、機密情報を暗号化して隠す機能ではありません。`terraform.tfstate`、保存済み `tfplan`、`terraform show -json` の結果、Provider のデバッグログは公開しないでください。
+ただ、普通に Terraform を書くとドメイン名や Zone ID がそのままコードに出てきます。それでは公開リポジトリにしづらいですし、設定ファイルを全部ローカルに置くのも端末への依存が増えてしまいます。
 
-## はじめに
+結果的に、**コードは GitHub、実際の設定値は非公開の R2、plan / apply は Private リポジトリ**という構成にしています。
 
-### ディレクトリ構成
+| 置き場所 | 何を置くか |
+| --- | --- |
+| 公開の `cftf` | Terraform のコード、モジュール、認証情報不要のテスト |
+| 非公開 R2 の Config バケット | Zone ID、DNS、WAF、Worker ソースなどの設定値 |
+| 非公開 R2 の State バケット | Terraform state |
+| 非公開の `cftf-deploy` | 設定の取得、plan の検査、承認後の apply |
+
+公開リポジトリを clone するだけで本番構成を復元できるわけではありません。R2 の設定・state・権限・バックアップがそろって初めて動きます。
+
+ここで勘違いしやすいのが Terraform の `sensitive` です。これは通常の出力を隠すための指定であって、値を暗号化するわけではありません。**state、保存した plan、`terraform show -json`、Provider のデバッグログは公開しないでください。**
+
+## ディレクトリ構成
 
 ```text
 cftf/
-├── .github/workflows/         # 非機密の検証と private apply の要求
-├── .github/scripts/           # PR の承認・マージ制御
+├── .github/
+│   ├── workflows/         # 公開側のテストとデプロイ要求
+│   └── scripts/           # PR の承認・マージ処理
 ├── stacks/
-│   ├── zone/                 # 全 Zone 共通の Terraform root
-│   ├── security-account/     # Account 共通の IP List / Turnstile
-│   ├── r2/                   # R2 バケットと設定
-│   ├── workers/              # 汎用 Workers の配備構成
-│   └── f2b/                  # Fail2ban API のインフラ基盤
+│   ├── zone/              # Zone 共通の Terraform root
+│   ├── security-account/  # Account 単位の IP List と Turnstile
+│   ├── r2/                # R2 バケットと各種設定
+│   ├── workers/           # 汎用 Workers
+│   └── f2b/               # Fail2ban API のインフラ
 ├── modules/
-│   ├── zone/                 # Zone ごとの DNS、WAF、Bot、TLS など
-│   └── account-security/     # Account 単位のセキュリティ設定
-├── bootstrap/backend/        # State / Config バケットの作成と復旧
-├── examples/                 # プレースホルダーを使った入力例
-├── scripts/tf.sh             # Private 実行処理のローカル入口
-└── .private/                 # Git 管理外の一時データ・詳細ログ
+│   ├── zone/
+│   └── account-security/
+├── bootstrap/backend/     # State / Config バケットの初期構築・復旧
+├── examples/              # ダミー値を使った設定例
+└── scripts/tf.sh          # Private 側の実行処理を呼び出す
 ```
 
-各 Zone に個別の Terraform ディレクトリを作るのではなく、`stacks/zone` を複数の匿名ターゲットから利用します。`zone-001` のような名前は実際のドメインや Cloudflare ID と無関係な識別子です。Private 側の許可リストが、使用できるターゲットと state キーを決定します。
+`stacks/` が Terraform を実行する単位で、`modules/` は共通化したリソース定義です。
 
-同じ root を使っても、`TF_DATA_DIR` と backend の state キーをターゲットごとに分離します。**同じ State を異なるターゲットで共有しないでください。**
+### Zone ごとにコードを複製しない
 
-| 管理対象 | Terraform root | 役割 |
-| --- | --- | --- |
-| DNS、Zone 設定、WAF、Bot 対策 | `stacks/zone` | Zone ごとに独立した state |
-| IP List、Turnstile | `stacks/security-account` | Account で共通の state |
-| R2 バケット・設定 | `stacks/r2` | 既存バケットの管理 |
-| 汎用 Workers | `stacks/workers` | スクリプト、Cron、Route、Domain 等 |
-| Fail2ban API | `stacks/f2b` | D1、Access、カスタムドメイン等の箱 |
-| State / Config バケット | `bootstrap/backend` | 初期作成・復旧専用 |
+例えば 10 個の Zone を持っているとして、Zone ごとにほぼ同じ Terraform ファイルを作ると、WAF の変更のたびに 10 回修正することになります。
 
-Zone モジュールの入力と制約は[Zone モジュール](modules/zone/README.md)、Account 共通の設定は[Account Security モジュール](modules/account-security/README.md)を参照してください。
+それを避けるため、`stacks/zone` という共通 root を使い、設定値だけを切り替えます。
 
-### 変更前の確認
+`zone-001` や `zone-002` といった匿名ターゲットから実際の Zone への対応は、Private 側の許可リストで管理します。コードにドメインや Zone ID を書く必要はありません。
 
-既存の Cloudflare 資源を取り込んで使う構成です。新規のターゲットや設定を追加する前に、次の点を確認してください。
+ただし、同じ root を使うからといって state まで共有するわけではありません。ターゲットごとに `TF_DATA_DIR` と backend の state キーを分けています。**別々の Zone に同じ state キーを設定しないようにしてください。**
 
-1. 対象 Zone / Account が Private の許可リストに登録されており、正しい既存 state キーが割り当てられていること。
-2. Config リビジョンが固定され、manifest と各ファイルの SHA-256 が一致すること。
-3. 既存リソースの ID を非公開入力へ設定し、必要な `import` 定義が有効であること。
-4. 同一の Cloudflare リソースや Ruleset Phase を、別の Terraform state が所有していないこと。
-5. 非公開環境の plan が、意図しない削除・置換・設定の無効化を含まないこと。
+| Stack | 管理範囲 |
+| --- | --- |
+| `stacks/zone` | DNS、WAF、Bot、TLS、DNSSEC |
+| `stacks/security-account` | Account 共通の IP List と Turnstile |
+| `stacks/r2` | R2 のバケット、公開設定、Lifecycle、CORS |
+| `stacks/workers` | 汎用 Worker のスクリプト、Cron、Route、カスタムドメイン |
+| `stacks/f2b` | Fail2ban API 用の D1、Access、WAF など |
+| `bootstrap/backend` | State / Config バケットの初期作成と復旧 |
 
-**注意:** `terraform init -reconfigure` は backend の設定を再初期化する操作であり、state を移行する操作ではありません。誤った state キーや空の state を使った plan を、そのまま apply しないでください。
+モジュールの詳しい入力は [Zone](modules/zone/README.md) と [Account Security](modules/account-security/README.md) に書いています。
 
-### ローカルでの検証
+## テストする
 
-Arch Linux / Artix Linux でのパッケージ導入例です。
+いきなり本番の Cloudflare に接続するのではなく、まず公開側のテストを実行します。これらは Cloudflare の本番認証情報を必要としません。
+
+Arch Linux / Artix Linux で必要なパッケージを入れる場合は、例えば以下です。
 
 ```sh
 sudo pacman -S --needed \
   bash coreutils git github-cli jq terraform python python-pip aws-cli
 ```
 
-CI は Terraform **1.15.9** を使用します。ローカルも同じバージョンに揃えてください。`github-cli` は `gh` コマンドのパッケージ名です。
-
-インフラ認証情報なしで、公開側のフォーマット・入力値の検証・モックテストを実行できます。
+CI の Terraform は `1.15.9` です。バージョンが違うと Provider や構文の影響で別の問題が出るので、できればそろえてください。
 
 ```sh
 terraform fmt -check -recursive
+
+# PR の承認処理と実行ラッパー
 .github/scripts/control.test.sh
 ./scripts/tf.test.sh
 
+# Terraform モジュールのテスト
 terraform -chdir=modules/zone init -backend=false -input=false
 terraform -chdir=modules/zone test
 
@@ -86,17 +93,33 @@ terraform -chdir=modules/account-security init -backend=false -input=false
 terraform -chdir=modules/account-security test
 ```
 
-この検証には Terraform Provider の取得などでネットワーク接続が必要になる場合がありますが、Cloudflare の本番認証情報は使用しません。テストに合格しただけでは、Cloudflare API への apply や権限の検証が完了したことにはなりません。
+`-backend=false` にしているのは、本番 state に接続しないためです。Provider の取得でネットワークが必要になることはありますが、ここで Cloudflare の設定が変更されるわけではありません。
 
-CI 相当の追加チェックは[テストと CI](#テストと-ci)を参照してください。
+各 stack の `validate` や追加テストも CI で実行しています。シェルや Workflow の検査は後述します。
 
-## 設定を plan / apply する
+## plan と apply
 
-### Private 環境の準備
+### なぜ Private 側で実行するのか
 
-このリポジトリ単体から直接本番の plan を実行しません。隣接する非公開の `cftf-deploy` checkout、その仮想環境、Cloudflare / R2 の権限が必要です。
+非公開の tfvars を使えば安全かというと、そうでもありません。Terraform は plan にリソース名や識別子を出しますし、`terraform show -json` ならさらに多くの値を取得できます。
 
-例の `.env.example` は変数名の参考です。実際の認証情報と承認済みの Config リビジョンを **Git 管理外**の `.env` に設定してください。値や内容をチャット、Issue、PR、CI のログに貼り付けないでください。
+そのため、公開側では本番の plan / apply を実行しません。
+
+`scripts/tf.sh` は Terraform を直接実行するものではなく、Private の `deployment.local` を呼び出すだけのラッパーです。R2 からの取得、state の選択、plan の保存、削除・置換の検査は Private 側で行います。
+
+### 準備
+
+標準では、リポジトリを次のように並べて使います。
+
+```text
+~/git/
+├── cftf/
+└── cftf-deploy/  # 非公開
+```
+
+違う場所に配置する場合は `CFTF_DEPLOY_DIR` を指定できます。Private 側の Python 仮想環境が別の場所にある場合は `CFTF_DEPLOY_PYTHON` を指定してください。
+
+`.env.example` を参考に、Cloudflare と R2 の認証情報、承認した Config リビジョンを Git 管理外の `.env` に設定します。既存のファイルを上書きしないようにしてください。
 
 ```sh
 umask 077
@@ -105,27 +128,25 @@ set -a
 set +a
 ```
 
-既存の `.env` は上書きしないでください。Private リポジトリが標準の隣接ディレクトリにない場合は `CFTF_DEPLOY_DIR`、仮想環境の Python が異なる場合は `CFTF_DEPLOY_PYTHON` を設定します。
+`umask 077` だけで既存ファイルの権限まで変わるわけではありません。`.env` 自体の権限も確認が必要です。
 
-`scripts/tf.sh` は自分で Terraform plan の内容を表示・解析するスクリプトではありません。Private 側の `deployment.local` を呼び出す薄いラッパーです。R2 からの取得、実際の backend 設定、`TF_DATA_DIR` の分離、plan の検査、保存済み plan の apply は Private 側で処理します。
-
-### 対象を確認する
+### 対象の確認
 
 ```sh
 ./scripts/tf.sh --list-targets
 ```
 
-出力されるのは、Private の `deployment/config.json` に登録された匿名ターゲット名だけです。リストを公開する設計であっても、ドメイン名・実 ID・state キーをターゲット名に埋め込まないでください。
+Private の `deployment/config.json` にある匿名ターゲットが表示されます。実際のドメインや state キーが見えるものではありません。
 
-Bash の補完が必要な場合は、リポジトリのルートから実行します。
+Bash で補完したい場合は、以下を読み込めます。
 
 ```sh
 source ./scripts/tf-completion.bash
 ```
 
-永続化する場合は、この補完スクリプトを**絶対パス**で読み込む行を `~/.bashrc` に追加します。補完候補は Private の許可リストから取得され、設定の更新後も反映されます。
+毎回使うなら、絶対パスに直して `~/.bashrc` に追加してください。候補はそのときの Private 側の許可リストから取得します。
 
-### plan を実行する
+### plan の実行
 
 ```sh
 ./scripts/tf.sh zone-001 plan
@@ -134,51 +155,61 @@ source ./scripts/tf-completion.bash
 ./scripts/tf.sh security-account plan
 ```
 
-`zone-001` などは例です。許可リストに存在する値だけを指定できます。
+`zone-001` は例なので、実際には `--list-targets` に出る名前を使ってください。
 
-plan の通常の標準出力には、固定された状態メッセージだけを表示します。詳細は `.private/runtime/` に格納され、ディレクトリを `700`、ファイルを `600` として管理します。保存した plan や診断ログを公開しないでください。
+通常の出力は固定の状態メッセージだけです。実際の差分や診断ログは Git 管理外の `.private/runtime/` に保管し、ディレクトリ `700`、ファイル `600` の権限で扱います。
 
-### apply を実行する
+### apply の実行
 
 ```sh
 ./scripts/tf.sh zone-001 apply
 ```
 
-`apply` は、Private 側で plan を生成・検査し、**検査した保存済み plan** を適用する操作です。通常の任意 Terraform オプションは受け付けません。実行には Private 側の権限と事前確認が必要です。
+Private 側で plan を作り直し、検査した**保存済み plan** を適用します。公開側から任意の Terraform オプションを渡せるようにはしていません。
 
-**警告:** `apply` を試すために実際の Zone を新規ターゲットへ割り当てたり、別の state キーへ切り替えたりしないでください。既存資源の削除・更新を引き起こす可能性があります。
+既存の環境で特に気を付けたいのが state キーです。`terraform init -reconfigure` は backend を再設定するだけで、state の移行は行いません。間違ったキーで空の state を見てしまうと、すでに存在するリソースを新しく作ろうとする場合があります。
 
-## GitHub Actions からの反映
+**初回の取り込みや移管では、正しい state を見ているか、ほかの state が同じリソースを所有していないか、必ず plan で確認してください。**
 
-公開リポジトリの PR に `terraform-apply` ラベルを付けると、条件が揃った場合に承認・マージ・Private デプロイの要求が進みます。
+## GitHub Actions で反映する
 
-1. `Terraform checks` がフォーマット、Terraform の構文・入力検証、モックテストを実行します。ここでは本番の Cloudflare 認証情報を使用しません。
-2. 許可された利用者が `terraform-apply` ラベルを付けます。承認の対象は、その時点の PR head SHA です。
-3. CI とレビュー状態を確認した controller が squash merge を行います。head が変わった場合は、古い承認・ラベルをそのまま利用できません。
-4. controller はマージされた確定 SHA を非公開 `cftf-deploy` へ通知します。
-5. Private CI が最新の `master`、承認、マージ SHA と R2 の固定設定リビジョンを確認し、全ターゲットの plan を検査します。
-6. 意図しない削除・置換を拒否し、保存済み plan を適用します。
+手動実行だけではなく、PR のレビューから Private 側の apply までつなげています。
 
-公開側へ返すのは固定の成功・失敗・後続コミットによる置き換え通知のみです。**plan の本文、ドメイン、ID、リソースの種類・件数は公開しません。** Private CI も PR ブランチのコードではなく、マージ済みコミットを対象にします。
+1. PR を作ると `Terraform checks` が実行されます。公開側で機密情報は使いません。
+2. 許可されたユーザーが `terraform-apply` ラベルを付けます。この時点の **head SHA** が承認対象です。
+3. テストとレビュー状態を確認した controller が squash merge します。コミットが更新されたら、古い承認を引き継ぎません。
+4. マージされた SHA を Private の `cftf-deploy` に通知します。
+5. Private 側でもマージ済みコミットと R2 リビジョンを確認し、全ターゲットの plan を検査してから apply します。
 
-自動化は Public と Private の両方で有効化用 PR をマージすると既定で有効になります。以前の `AUTOMATION_ENABLED` と `DEPLOY_ENABLED` は参照しません。GitHub App、必要な Secrets、R2 の State / Config、固定済み Config リビジョンを確認し、**Private の `Private Terraform checks`（`verify.yml`）を現行 master で成功させてから** `terraform-apply` ラベルを使用してください。PR のマージだけで任意の Terraform 変更が apply されるわけではなく、従来どおり許可された人のラベル操作、現在の head SHA、CI 成功、レビュー状態、Private 側の検査が必要です。
+公開側に返すのは固定の成功・失敗などの通知だけで、plan 本文やリソース名、件数、実際の ID は出しません。
 
-緊急停止は GitHub の Repository Variables で明示します（両方停止する場合）:
+以前は `AUTOMATION_ENABLED` と `DEPLOY_ENABLED` を使っていましたが、現在は**自動化が既定で有効**になる構成です。両方の有効化 PR をマージした後は、古い Enabled 変数を参照しません。
+
+ただし、何でも自動で apply するわけではありません。GitHub App、Secrets、R2 の State / Config、固定した設定リビジョンを確認し、Private 側の `Private Terraform checks`（`verify.yml`）を現行 `master` で成功させてから `terraform-apply` ラベルを使ってください。許可された人のラベル操作、最新 head SHA、CI、レビュー、Private 側の plan 検査は引き続き必要です。
+
+### 自動反映を緊急停止する
+
+問題があれば、GitHub の Repository Variables で止められます。
 
 ```sh
+# 公開側の自動マージ・デプロイ要求を停止
 gh variable set AUTOMATION_DISABLED --repo haturatu/cftf --body true
+
+# Private 側の apply を停止
 gh variable set DEPLOY_DISABLED --repo haturatu/cftf-deploy --body true
 ```
 
-再開するときは、復旧と検証を済ませた後で両方を `false` にします。`AUTOMATION_DISABLED` は Public の自動マージ・デプロイ要求を停止し、`DEPLOY_DISABLED` は Private の apply ジョブを停止します。Private 側の `verify.yml` は停止スイッチとは独立して手動検証に使用できます。
+復旧と検証が済んだら、それぞれ `false` に戻します。`AUTOMATION_DISABLED` は公開側の自動マージ・デプロイ要求、`DEPLOY_DISABLED` は Private 側の apply ジョブを止めます。Private の `verify.yml` は停止スイッチに関係なく手動の確認に使えます。
 
-`terraform-apply` を付けないドキュメント PR は、通常の検証・レビュー対象です。ラベルを貼る場合は、条件が満たされると自動マージとデプロイ要求につながることに注意してください。実際のラベル処理は [request-apply.yml](.github/workflows/request-apply.yml) と [control.py](.github/scripts/control.py) を参照してください。
+`terraform-apply` を付けると、条件が満たされた際に**自動マージとデプロイ要求**まで進みます。ドキュメントだけを変更する PR では、通常このラベルを付ける必要はありません。
 
-## R2 の設定と state
+実際の処理は [request-apply.yml](.github/workflows/request-apply.yml) と [control.py](.github/scripts/control.py) にあります。
+
+## R2 に置く設定と state
 
 ### Config リビジョン
 
-非公開の Config バケットでは、一度承認した設定を上書きせず、`revisions/<revision>/` に新しいリビジョンとして保管します。
+設定ファイルは、非公開の Config バケットに次のような単位で保存します。
 
 ```text
 revisions/<revision>/
@@ -191,70 +222,66 @@ revisions/<revision>/
 └── manifest.json
 ```
 
-`backend.hcl` には S3 互換のエンドポイントとバケット設定を記録しますが、**state キーは含めません**。state キーは Private の許可リストから取得します。
+`backend.hcl` には R2 の S3 互換エンドポイントやバケットの設定を入れますが、state キーは入れません。state キーは Private 側の許可リストで管理します。
 
-`*.tfvars.json` は Terraform 標準の JSON 入力形式です。複合した Cloudflare 設定は `value_json`、Ruleset のルール配列は `rules_json` に JSON 文字列として指定します。Worker の `source_path` などは、Private 側で取得した実ファイルの絶対パスへ変換します。
+tfvars は Terraform 標準の JSON 形式を使います。設定値の JSON は `value_json`、WAF のルール配列は `rules_json` です。Worker のソースパスも、Private 側でダウンロードした実ファイルの絶対パスへ変換します。
 
-`manifest.json` 自体の SHA-256 に加え、manifest に含まれる各ファイルのサイズと SHA-256 も検証します。リビジョンの上書きは行わず、変更のたびに新たなリビジョンを発行します。
+一度承認したリビジョンは上書きせず、変更時は新しく発行します。manifest の SHA-256 と、ファイルごとのサイズ・SHA-256 を確認してから使用するため、途中で内容が変わっていた場合は拒否する構成です。
 
-認証の権限は分離します。
+### 認証情報も分ける
 
-| 認証 | 必要な用途 |
+| 認証情報 | 用途 |
 | --- | --- |
-| Config 用 R2 キー | 承認済み設定を読み取る |
+| Config 用 R2 キー | 設定の読み取り |
 | State 用 R2 キー | 対象 state の読み書き |
-| Cloudflare API token | Provider が管理資源を参照・更新する |
-| GitHub App の認証 | Private デプロイ workflow を要求する |
+| Cloudflare API token | 実際のリソースの確認と更新 |
+| GitHub App | Private のデプロイ Workflow を要求 |
 
-このうちどれも公開リポジトリに保存しません。実値は Private 側の適切な Secrets / 環境変数で管理してください。
+これらを公開 GitHub に置かないことはもちろん、**Config 読み取り用のキーで State まで操作できるようにしない**ことも重要です。
 
-### state の注意点
+R2 の State と Config は別のバケットにしています。どちらも非公開です。
 
-Config と State の R2 バケットは分けます。両バケットとも公開アクセスを無効にし、管理者権限を必要最小限に制限してください。
+なお、R2 は S3 のオブジェクトバージョニングと同じ方法で state を復元できるものではありません。State、bootstrap の復旧情報、認証情報は、別の非公開ストレージにもバックアップしておく必要があります。
 
-R2 の S3 互換 API には S3 のオブジェクトバージョニングと同等の復旧機能がありません。state、bootstrap 情報、復旧に必要な認証情報のバックアップは、**別の非公開ストレージ**にも保管してください。
+`bootstrap/backend` は初期作成と復旧のためのものです。普段の CI から毎回 apply する用途ではありません。
 
-`bootstrap/backend` は日常の CI の apply 対象ではなく、State / Config バケットの初期作成と復旧専用です。既存 state とバケットを二重作成しないでください。
+## Cloudflare Free のセキュリティ機能
 
-## Cloudflare Free プランの保護機能
+このリポジトリは Free プランで使える機能を中心に作っています。
 
-以下は、このリポジトリで扱う Free プラン向け保護機能です。**機能の提供範囲**と、**このリポジトリでの実装・管理の有無**は別です。Cloudflare の制限や API の権限は変更されるため、適用時には公式ドキュメントと非公開環境の plan を確認してください。
+ただし、Cloudflare が自動で適用しているもの、Terraform で管理できるもの、ダッシュボードだけで見るものは別です。片っ端から Terraform のリソースを作れば防御が強くなるわけでもありません。
 
-### 機能一覧
+以下はこのリポジトリで扱っている主な機能です。プラン上限や API の権限は変わることがあるので、適用前には Cloudflare の公式ドキュメントと実際の plan を確認してください。
 
-| 機能 | Free プランの範囲 | cftf での管理 |
+| 機能 | Free プランでの扱い | Terraform 側 |
 | --- | --- | --- |
-| Cloudflare Free Managed Ruleset | 自動適用 | 原則そのまま使用。調整時は `managed_entrypoints` |
-| HTTP / L3・L4 DDoS Protection | 自動防御 | 原則そのまま使用。L7 調整時は `managed_entrypoints` |
-| WAF Custom Rules | Zone ごとに最大 5 ルール | `rulesets`（`http_request_firewall_custom`） |
-| WAF Rate Limiting | Zone ごとに 1 ルール、10 秒単位 | `rulesets`（`http_ratelimit`） |
-| IP Access Rules | Account 単位の API 上限あり | `access_rules` |
-| IP Custom Lists | Account ごとに 1 リスト | `stacks/security-account` |
-| User Agent Blocking | Zone ごとに最大 10 ルール | `user_agent_blocking_rules` |
-| Leaked Credentials Detection | 漏洩資格情報の検出 | `leaked_credential_check` |
-| Bot Fight Mode | Zone 全体へのチャレンジ | `bot_management.fight_mode` |
+| Free Managed Ruleset | Cloudflare が自動適用 | 原則そのまま使う |
+| HTTP DDoS Protection | 自動適用 | 上書きする場合のみ `managed_entrypoints` |
+| WAF Custom Rules | 5 ルール / Zone | `rulesets` |
+| WAF Rate Limiting | 1 ルール / Zone、10 秒 | `rulesets` |
+| IP Access Rules | IP / ASN / 国など | `access_rules` |
+| IP Custom List | 1 リスト / Account | `stacks/security-account` |
+| User Agent Blocking | 10 ルール / Zone | `user_agent_blocking_rules` |
+| Bot Fight Mode | Zone 全体に適用 | `bot_management.fight_mode` |
 | Block AI Bots / AI Labyrinth | AI クローラー対策 | `bot_management` |
-| Managed robots.txt | AI ポリシーの提示 | `bot_management` |
-| Turnstile | Account ごとに最大 20 ウィジェット | `stacks/security-account` |
-| URL Normalization | 許可された Zone で利用 | `url_normalization` |
-| DNSSEC | Cloudflare 側で有効化可能 | `dnssec` |
-| Managed Transforms | セキュリティヘッダー等 | `managed_transforms` |
-| Authenticated Origin Pulls | オリジン向け mTLS | `authenticated_origin_pulls` |
-| Browser Integrity Check | HTTP ヘッダー等の検査 | `settings` |
-| Security Level / Under Attack | 緊急時のチャレンジ | `settings` |
-| TLS 設定、HTTPS リダイレクト | Zone 設定 | `settings` |
-| Hotlink、Email Obfuscation 等 | Zone 設定 | `settings` |
-| Transform / Configuration / Cache Rules | プランごとのルール数制限 | `rulesets` |
-| Security Analytics / Events | ダッシュボード・ログの表示 | Terraform 管理対象外 |
-| Cloudflare Access / Tunnel | 無料枠あり | 対象構成の stack で管理 |
+| Managed robots.txt | クローラー向けポリシー | `bot_management` |
+| Leaked Credentials Detection | 漏洩資格情報の検出 | `leaked_credential_check` |
+| Turnstile | 20 Widget / Account | `stacks/security-account` |
+| URL Normalization | 利用できる Zone のみ | `url_normalization` |
+| DNSSEC | レジストラ側の設定も必要 | `dnssec` |
+| Managed Transforms | セキュリティヘッダーなど | `managed_transforms` |
+| Authenticated Origin Pulls | オリジンでの検証が必要 | `authenticated_origin_pulls` |
+| Browser Integrity Check | HTTP ヘッダーなどを検査 | `settings` |
+| TLS / HTTPS / Security Level | Zone 設定 | `settings` |
+| Configuration / Transform / Cache Rules | プランごとの上限あり | `rulesets` |
+| Security Analytics / Events | ダッシュボードで確認 | 対象外 |
+| Access / Tunnel | 無料枠あり | 対象の stack で管理 |
 
-**注意:** Pro / Business / Enterprise 固有のルールやスコアを Free の条件式に追加しないでください。たとえば Bot Management の ML スコアは Free で利用できません。
+### Web サイトの基本設定
 
-プランの制限は [Cloudflare WAF](https://developers.cloudflare.com/waf/)、[Custom Rules](https://developers.cloudflare.com/waf/custom-rules/)、[Rate Limiting](https://developers.cloudflare.com/waf/rate-limiting-rules/)、[Bot Fight Mode](https://developers.cloudflare.com/bots/get-started/bot-fight-mode/)、[Turnstile](https://developers.cloudflare.com/turnstile/plans/)で確認できます。
+毎回 `ssl = strict` や HTTPS リダイレクトを手で指定するのも面倒なので、ブラウザー向けサイトには `web_baseline` を用意しています。
 
-### Web サイトのベースライン
-
-ブラウザーから利用するサイトでは、`stacks/zone` の `web_baseline` を使用して基本的な Zone 設定をまとめて管理できます。以下は **非公開の Zone tfvars に追加する設定部分の例**です。
+非公開の Zone tfvars に、例えば以下の設定を追加します。
 
 ```json
 {
@@ -265,11 +292,11 @@ R2 の S3 互換 API には S3 のオブジェクトバージョニングと同�
 }
 ```
 
-上記は完全な tfvars ファイルではありません。Zone ID、Account ID などの必須入力を含む全体例は [examples/zone.tfvars.json.example](examples/zone.tfvars.json.example) を参照してください。
+これは設定の一部です。必須の Account / Zone 情報を含むファイル全体は [zone.tfvars.json.example](examples/zone.tfvars.json.example) を参照してください。
 
-`web_baseline` を指定した場合に管理する設定は次のとおりです。
+この設定で管理する値は次のとおりです。
 
-| Zone 設定 | 値 |
+| 設定 | 値 |
 | --- | --- |
 | `ssl` | `strict`（Full (strict)） |
 | `always_use_https` | `on` |
@@ -277,19 +304,15 @@ R2 の S3 互換 API には S3 のオブジェクトバージョニングと同�
 | `tls_1_3` | `on` |
 | `browser_check` | `on` |
 
-既存の `settings` に同じ `setting_id` が含まれる場合はベースライン値を優先します。既存の Terraform リソースアドレスに影響しないよう、既存のマップキーがある場合はそれを再利用します。
+既存の `settings` と同じ `setting_id` がある場合は、このベースラインの値が優先されます。
 
-`url_normalization = true` は、API と権限が対象 Zone で利用可能な場合だけ設定してください。Cloudflare API では plan に Zone の `Sanitize Read`、apply に `Sanitize Write` が必要です。`Zone Transform Rules` や `Zone WAF` の権限とは別です。
+`url_normalization = true` は、Cloudflare 側でその Zone が対応している場合だけ設定してください。API では Zone の `Sanitize Read` / `Sanitize Write` 権限が必要です。`dnssec = true` にした場合は、Cloudflare 側で有効にするだけでなく、レジストラへ DS レコードを登録する必要があります。
 
-`dnssec = true` は Cloudflare 側の有効化を行いますが、これだけでは信頼チェーンが完成しません。レジストラへ DS レコードを登録し、`dig +dnssec` などで確認してください。
-
-**保護対象の条件:** HTTP WAF が保護するのは Cloudflare を Proxy 経由で通るリクエストです。DNS レコードが DNS Only の場合は Cloudflare の HTTP WAF を通りません。
+また、Cloudflare の HTTP WAF が効くのは、リクエストが Proxy を経由しているときだけです。DNS Only のレコードは HTTP WAF を通りません。
 
 ### WAF Custom Rules
 
-`rulesets` にはユーザーが所有する Zone ルールセットを指定します。既存のルールセットを使う場合は、その **Zone エントリーポイントの ID** を `id` に指定して import します。未設定なら新規作成を試みます。
-
-次は **モジュールの設定方法を示す HCL の例**です。`rulesets` の内容を Private の JSON tfvars で表現する場合は、`rules_json` を JSON 文字列として格納します。
+例えば `/.env` や `/.git/` などへのアクセスを拒否する場合、`http_request_firewall_custom` にルールを追加します。
 
 ```hcl
 rulesets = {
@@ -310,11 +333,15 @@ rulesets = {
 }
 ```
 
-Free プランでは Custom Rules が 5 件までです。既存の Cloudflare Dashboard で管理しているルールと Terraform 側のルールを別々に数えず、**その Phase 全体の上限**として確認してください。
+これはモジュール入力を HCL で表した例です。実際の R2 設定は JSON tfvars なので、`rules_json` を JSON 文字列として保存します。
+
+Free の上限は Zone あたり 5 ルールです。既存ルールを別の Terraform state で管理していないかも確認してください。
 
 ### Rate Limiting
 
-Rate Limiting は `http_ratelimit` Phase に設定します。Free プランでは 1 Zone あたり 1 ルール、計測区間は 10 秒です。`characteristics` に `cf.colo.id` を含めます。
+API を公開する場合、WAF だけでなくリクエスト数を制限したいこともあります。
+
+`http_ratelimit` Phase を使いますが、Free では Zone ごとに 1 ルール、`period` は 10 秒です。`characteristics` に `cf.colo.id` を含める必要があります。
 
 ```hcl
 rulesets = {
@@ -339,41 +366,42 @@ rulesets = {
 }
 ```
 
-`requests_per_period = 30` は設定例であり、推奨値ではありません。通常の利用者やモバイルクライアントのアクセス量に合わせて調整してください。
+ここでの 30 リクエストは設定例です。実際には API の通信量に合わせて調整します。
 
-`block` の期間指定には `mitigation_timeout = 10`、`challenge` / `js_challenge` / `managed_challenge` の request throttling には `mitigation_timeout = 0` を使用します。Free / Pro / Business の challenge は期間指定と挙動が異なります。
+`block` / `log` では `mitigation_timeout = 10`、`challenge` などの request throttling では `mitigation_timeout = 0` を使います。
 
-Rate Limiting は各 Cloudflare データセンターで計数されるため、世界全体のリクエストを合計した固定上限ではありません。詳しくは [Rate Limiting の制限](https://developers.cloudflare.com/waf/rate-limiting-rules/troubleshooting/) を参照してください。
+ちなみに、これは全世界で同じ IP から 10 秒間に 30 リクエストを数える、という意味ではありません。`cf.colo.id` を含むため Cloudflare のデータセンター単位の計数になります。
 
-### Bot 対策と Turnstile
+### Bot Fight Mode を全 Zone で有効にすればいいわけではない
 
-`bot_management.fight_mode` はブラウザー中心の Zone で検討してください。**Bot Fight Mode は Zone 全体に作用し、WAF Custom Rules の Skip では除外できません。** API、モバイルアプリ、ヘルスチェックの通信がチャレンジされる可能性があります。
+Bot Fight Mode はブラウザーで見る Web サイトには便利ですが、API やモバイルアプリを提供する Zone では面倒なことがあります。正規のクライアントまでチャレンジされる場合があるためです。
 
-API を提供する Zone では、まず WAF、必要な範囲の Rate Limiting、Cloudflare Access を組み合わせる方が制御しやすい場合があります。
+しかも、**Bot Fight Mode は WAF Custom Rules の Skip で除外できません**。
 
-`bot_management` には AI クローラー対策の `ai_bots_protection`、`crawler_protection`、`is_robots_txt_managed`、`ai_training`、`ai_user`、`aisearch`、`cf_robots_variant`、`bot_preference_sync_enabled` などを指定できます。実際に利用できる値は [modules/zone/variables.tf](modules/zone/variables.tf) の validation と対象 Zone の API に従ってください。
+なので API 用の Zone では、まず WAF、Rate Limiting、Cloudflare Access などを組み合わせる方が扱いやすい場合があります。
 
-Turnstile は、ページ全体に Bot Fight Mode を適用せず、ログイン・登録・フォーム送信など特定の処理を保護したい場合に利用できます。サイト側で発行したトークンを検証する実装が必要です。Widget の作成だけでフォーム送信の検証が完了するわけではありません。
+`bot_management` には Bot Fight Mode 以外にも、`ai_bots_protection`、`crawler_protection`、`is_robots_txt_managed`、`ai_training`、`ai_user`、`aisearch` などがあります。実際の入力値は [modules/zone/variables.tf](modules/zone/variables.tf) を確認してください。
 
-### TLS、ヘッダー、オリジン
+フォームだけ保護したければ Turnstile も使えます。ただし Widget を作成するだけでは保護になりません。アプリケーション側で発行されたトークンを Siteverify で検証する必要があります。
 
-Zone の TLS とブラウザー保護は `settings` で管理します。
+### TLS とセキュリティヘッダー
 
-| `setting_id` | 設定値の例 | 目的 |
+TLS 周りは `settings` で管理します。主な値は以下です。
+
+| `setting_id` | 例 | 用途 |
 | --- | --- | --- |
 | `ssl` | `strict` | Full (strict) |
-| `always_use_https` | `on` | HTTPS へリダイレクト |
-| `automatic_https_rewrites` | `on` | 一部の混在コンテンツを HTTPS に書き換え |
-| `min_tls_version` | `1.2` | 最小 TLS バージョン |
+| `always_use_https` | `on` | HTTPS リダイレクト |
+| `automatic_https_rewrites` | `on` | 混在コンテンツの一部を書き換える |
+| `min_tls_version` | `1.2` | TLS の最小バージョン |
 | `tls_1_3` | `on` | TLS 1.3 |
-| `security_header` | HSTS の JSON 値 | ブラウザーの HTTPS 強制 |
+| `security_header` | HSTS の JSON 設定 | HTTPS 接続の強制 |
 | `browser_check` | `on` | Browser Integrity Check |
-| `security_level` | `medium` | `under_attack` は緊急時のみ |
-| `email_obfuscation` | `on` | メールアドレスの収集抑制 |
-| `hotlink_protection` | `on` | 画像の直リンク制限 |
-| `replace_insecure_js` | `on` | 危険なライブラリの置換 |
+| `security_level` | `medium` | `under_attack` は緊急時向け |
+| `hotlink_protection` | `on` | 画像の直リンク防止 |
+| `email_obfuscation` | `on` | メールアドレスの難読化 |
 
-`settings.value_json` には JSON で表現した設定値を指定します。
+`value_json` には JSON として有効な文字列を指定します。
 
 ```hcl
 settings = {
@@ -385,95 +413,70 @@ settings = {
     setting_id = "min_tls_version"
     value_json = jsonencode("1.2")
   }
-  hsts = {
-    setting_id = "security_header"
-    value_json = jsonencode({
-      strict_transport_security = {
-        enabled            = true
-        max_age            = 31536000
-        include_subdomains = true
-        preload            = false
-        nosniff            = true
-      }
-    })
-  }
 }
 ```
 
-**警告:** HSTS の `include_subdomains` / `preload` は、すべての対象ホストが HTTPS に対応し、長期間維持できることを確認してから有効にしてください。設定を誤るとブラウザーからのアクセスを長期間妨げます。
+HSTS は有効にすればいいというものでもありません。特に `include_subdomains` や `preload` は、ほかのサブドメインまで HTTPS を維持できると確認してから使ってください。
 
-`managed_transforms` の `add_security_headers` はセキュリティヘッダーを追加します。CSP などサイト固有の応答ヘッダーには `http_response_headers_transform` Phase を使用できます。
+`managed_transforms` では `add_security_headers` のような既定の変換を使えます。CSP などサイト固有のヘッダーは `http_response_headers_transform` で設定できます。
 
-Authenticated Origin Pulls は Cloudflare からオリジンへの認証に使用しますが、**オリジン側にも証明書と検証設定が必要**です。Cloudflare 側で有効化しただけで保護は完成しません。
+また、Authenticated Origin Pulls を使うなら、オリジン側でもクライアント証明書を検証する必要があります。Cloudflare 側のスイッチだけで完了するものではありません。
 
-### Free Managed Ruleset と既存 Phase
+### Managed Ruleset はむやみに上書きしない
 
-Free Managed Ruleset および HTTP DDoS Protection は、通常 Cloudflare が自動で適用します。**自動適用される既存ルールセットを Terraform で新規作成し直さないでください。**
+Cloudflare Free Managed Ruleset と HTTP DDoS Protection は通常自動適用されるため、基本的に Terraform で作り直す必要はありません。
 
-既存 Phase の挙動を調整する場合は `managed_entrypoints` を使用します。対象は Cloudflare が実行する管理ルールセット本体（`kind = "managed"`）ではなく、Zone の Phase エントリーポイント（`kind = "zone"`）です。
+それでも既存の Phase の実行設定を変更したい場合は `managed_entrypoints` を使います。
 
-- `id` は **Zone エントリーポイント Ruleset** の ID を指定します。
-- `rules_json` は管理ルールセット ID を `action_parameters.id` に持つ、有効な `execute` ルールを含めます。
-- 空の `rules_json` や無条件の `skip` は、保護機能が失われるおそれがあるためモジュールで拒否します。
-- 既存 Phase がある場合は import し、**無変更の plan** を確認してから修正します。
+ここで指定する `id` は、管理ルールセット本体の ID ではなく、**Zone の Phase エントリーポイント Ruleset ID** です。`rules_json` には有効な `execute` ルールと、その `action_parameters.id` に実際の管理 Ruleset ID を指定します。
 
-管理 Ruleset の実 ID は Cloudflare API の rulesets 一覧から取得してください。実行先 Zone で使える管理ルールセットかどうかを確認し、例示された ID を無条件に流用しないでください。
+空の配列などを渡して保護が消えないよう、モジュールでも入力を検証します。ただし全ての設定事故を防げるわけではないので、変更前に既存 Phase を import し、まず無変更の plan を確認してください。
 
-### 同じ Phase の所有権を分離する
+### 同じ Ruleset を二つの state で管理しない
 
-Cloudflare では、同じ Zone / Phase のエントリーポイントを複数の Terraform state から管理しないでください。
+ちょっとややこしいのが `stacks/f2b` です。この stack は API 用に `http_request_firewall_custom` を所有しています。API クライアントに必要な Browser Integrity Check の Skip もここに入っています。
 
-`stacks/f2b` は、対象 Zone の `http_request_firewall_custom` Phase を所有し、API クライアントに対する Browser Integrity Check の Skip を設定します。同じ Zone を `stacks/zone` でも管理する場合は、この Phase を重複して追加しないでください。
+同じ Zone を `stacks/zone` でも管理するなら、その Phase を両方に作らないようにしてください。
 
-所有権を移す場合の順序:
+どうしても所有権を移す場合は、次の順番にします。
 
-1. 両 stack の自動 apply を停止します。
-2. 対象ルールセットの ID と現在のルールを API / state から取得し、非公開で保存します。
-3. 旧 `stacks/f2b` 側で `manage_api_browser_check = false` とし、Private 環境で `terraform state rm 'cloudflare_ruleset.api_browser_checks[0]'` を実行して、**実体を削除せずに state からのみ除外**します。
-4. 新 `stacks/zone` に既存ルールセット ID と全ルールを非公開入力として設定し、import します。
-5. plan が無変更であることを確認してから、実行を再開します。
+1. 両 stack の自動 apply を止める。
+2. 既存 Ruleset の ID と内容を Private 側で保存する。
+3. 旧 `stacks/f2b` の `manage_api_browser_check` を `false` にし、`terraform state rm 'cloudflare_ruleset.api_browser_checks[0]'` で**実際の Ruleset は消さずに**旧 state から外す。
+4. 新しい `stacks/zone` の非公開入力に同じ ID とルールを設定して import する。
+5. 無変更の plan を確認してから apply を再開する。
 
-`stacks/zone` は `cloudflare_rulesets` データソースで既存 Zone Phase を確認し、新規作成時の重複を拒否します。ただし、**別の state が所有しているかどうかまでは自動判定できません。** 移管中は適用処理を停止してください。
+`stacks/zone` はデータソースで同じ Phase の重複作成を検出しますが、**別 state の所有権までは分かりません**。移管している間は自動 apply を止めておくのが前提です。
 
-### Free プランの対象外
+### Free で使えない機能
 
-Super Bot Fight Mode、Bot Management の ML スコア、Cloudflare Managed Ruleset のフル版、OWASP Core Ruleset、Advanced Rate Limiting、Managed IP Lists、Enterprise の Account-level WAF、Sensitive Data Detection などは、Free プランの利用対象外です。`matches` など一部の式演算子にもプラン制限があります。
+Super Bot Fight Mode、Bot Management の ML スコア、Cloudflare Managed Ruleset のフル版、OWASP Core Ruleset、Advanced Rate Limiting、Managed IP Lists、Enterprise の Account-level WAF などは Free プランの対象外です。
 
-Free プラン用の設定に有料機能を混在させないでください。該当する機能は、Cloudflare 側の API で拒否される場合があります。
+Terraform に値を書けば使えるようになるわけではありません。`matches` などの式にもプランによる制限があります。
 
-## Account 共通のセキュリティ
+## Account 単位のセキュリティ
 
-IP Custom List と Turnstile は Zone 単位ではなく Account 単位の資源です。`stacks/security-account` にまとめて管理し、複数の Zone state から同じリストや Widget を作成しないでください。
+IP Custom List と Turnstile は Zone ではなく Account に属します。Zone ごとの state にそれぞれ作ると二重管理になるため、`stacks/security-account` に分けました。
 
-- **IP List:** Free では最大 1 リスト、10,000 項目。IPv4 / IPv6 / CIDR を指定します。
-- **Turnstile:** Free では最大 20 Widget。ログイン・フォーム用途などで使用します。
-- **既存資源の取り込み:** IP List の `import_id` はリスト ID、Turnstile の `import_id` は sitekey です。
-- **IP List の既存項目:** `items` を省略すると項目を保持し、空配列を明示すると全項目を削除します。
+IP List は Free だと 1 Account につき 1 リスト、最大 10,000 項目です。Turnstile は最大 20 Widget です。
 
-**注意:** Turnstile の secret は Terraform state に保存されます。`sensitive` 指定があっても state を公開しないでください。詳しい入力条件と例は [Account Security モジュール](modules/account-security/README.md)を参照してください。
+既存の IP List を import する場合、`items` を指定しないと現在のリスト内容を維持します。これに対して **`items = []` は全項目の削除**なので注意してください。
 
-## Fail2ban API の管理範囲
+Turnstile の sitekey は公開値ですが、secret は Terraform state に入ります。詳しくは [Account Security モジュール](modules/account-security/README.md) にあります。
 
-`stacks/f2b` は、D1、Cloudflare Access の組織 / Service Token / 収集ポリシー、カスタムドメイン、WAF など、アプリケーションを配備するための**インフラ基盤**を管理します。
+## f2b-api との役割分担
 
-**Worker のソースコード・バージョン・バインディングをこの stack からデプロイしません。** アプリケーションは別の [f2b-api](https://github.com/haturatu/f2b-api) リポジトリが Wrangler を使って配備します。D1 のマイグレーションも `f2b-api/migrations` を使用します。
+`stacks/f2b` は D1、Cloudflare Access、Service Token、カスタムドメイン、WAF といった、API を動かすための**土台**を作ります。
 
-非公開の `terraform output -json deployment_config` の内容は、`f2b-api` の保護された `production` 環境にある `F2B_DEPLOY_CONFIG` Secret へ設定します。出力には D1 ID、Worker 名、Access の AUD と設定が含まれるため、公開ログや PR コメントに貼り付けないでください。
+アプリケーションのソースを Terraform でデプロイするわけではありません。実際の Worker は別リポジトリの [f2b-api](https://github.com/haturatu/f2b-api) が Wrangler でデプロイし、D1 のマイグレーションもそちらで実行します。
 
-収集ドメインは Access の Service Auth で保護し、収集元ごとに Service Token を発行します。Worker の `workers.dev` とプレビュー URL は Wrangler 側で無効化します。`stacks/f2b` が所有する WAF Phase を `stacks/zone` でも重複管理しないでください。
+Terraform の `deployment_config` 出力には D1 の ID や Access の設定などが含まれます。`terraform output -json deployment_config` は非公開で取得し、`f2b-api` の保護された `production` 環境の Secret `F2B_DEPLOY_CONFIG` に設定します。
 
-Access の組織が未作成の場合は、初回だけ管理 API による組織の初期化が必要となる構成があります。`auth_domain` を非公開入力へ保存してから plan してください。
+収集側の通信は Cloudflare Access の Service Auth で保護し、収集元ごとに Service Token を使います。`workers.dev` とプレビュー URL は Wrangler 側で無効化します。
 
-## テストと CI
+## CI と初回取り込みの注意
 
-CI の `Terraform checks` は、Cloudflare の本番認証情報を使わずに次の確認を行います。
-
-- `terraform fmt -check -recursive`
-- PR 承認 controller とローカルラッパーのテスト
-- 各 stack / bootstrap の `terraform init -backend=false` と `validate`
-- Zone、Account Security、bootstrap、f2b などの `terraform test`
-
-ローカルでシェルの静的解析と workflow の検証を行うには、`shellcheck`、`shfmt`、`actionlint` を追加します。
+CI の `Terraform checks` は、認証情報を使わずに各 stack の `validate` や Terraform テストを実行します。ローカルでシェルと Workflow も確認したければ、次のようにします。
 
 ```sh
 sudo pacman -S --needed shellcheck shfmt actionlint
@@ -484,22 +487,19 @@ actionlint -ignore 'unexpected key "queue" for "concurrency" section' \
   .github/workflows/*.yml
 ```
 
-現行 CI が使用する `concurrency.queue: max` は、actionlint 1.7.12 で未認識となるため、その警告だけを除外します。
+`concurrency.queue: max` は actionlint 1.7.12 で未認識なので、その警告だけ除外しています。
 
-Terraform Provider は stack ごとの `.terraform.lock.hcl` で固定します。Provider 更新時は Private 側の `deployment/config.json` の `provider_version` と `trust/cloudflare.lock.hcl` を揃えてください。Terraform CLI のバージョンも公開・Private の workflow 間で一致させます。
+Provider のバージョンは各 stack の `.terraform.lock.hcl` で固定しています。更新時は Private 側の `deployment/config.json` と `trust/cloudflare.lock.hcl` も合わせる必要があります。Terraform CLI のバージョンも両リポジトリでそろえてください。
 
-`imports.tf` は既存リソースを初めて state に取り込むための定義です。対象の import と plan の一致を確認する前に削除しないでください。
+既存リソースの取り込みに使う `imports.tf` は、import と plan の確認が終わるまで削除しないでください。
 
-R2 の一部設定（Managed Domain、Lifecycle、CORS）は固定 Provider で import に未対応です。初回 plan で作成として表示されても、既存の設定を上書きする API 呼び出しとなる場合があります。必ず非公開環境で差分と意図を確認してください。
-
-[Dependabot の設定](.github/dependabot.yml)は、GitHub Actions と Terraform Provider の定期更新を管理します。自動更新 PR も通常のレビュー対象であり、`terraform-apply` ラベルなしに本番反映されるわけではありません。
+また、R2 の Managed Domain、Lifecycle、CORS は、現在固定している Provider では import 非対応です。初回 plan で「作成」と表示されても、既存設定を更新する API 呼び出しになる場合があります。ここは特に注意して確認してください。
 
 ## 参考資料
 
 - [Cloudflare Terraform の R2 backend](https://developers.cloudflare.com/terraform/advanced-topics/remote-backend/)
 - [Terraform S3 backend](https://developer.hashicorp.com/terraform/language/backend/s3)
-- [Cloudflare WAF とプラン別の機能](https://developers.cloudflare.com/waf/)
+- [Cloudflare WAF](https://developers.cloudflare.com/waf/)
 - [Cloudflare Rate Limiting](https://developers.cloudflare.com/waf/rate-limiting-rules/)
 - [Bot Fight Mode](https://developers.cloudflare.com/bots/get-started/bot-fight-mode/)
-- [Terraform の設計ガイドライン](https://future-architect.github.io/arch-guidelines/documents/forTerraform/terraform_guidelines.html)
-- [GitHub Actions のイベント](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)
+- [GitHub Actions の実行イベント](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)
