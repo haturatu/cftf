@@ -487,6 +487,7 @@ Cloudflare Free Managed Ruleset と HTTP DDoS Protection は通常自動適用�
 3. 存在しない場合だけ `id` を省略して新規作成します。
 4. 既存ルールを import した直後の plan が無変更であることを確認します。差分が出る場合は、`rules_json` が現在のルールと一致していません。
 5. 同じ Zone の `http_ratelimit` を別の stack や state で同時に管理しないでください。`stacks/f2b` が所有するのは `http_request_firewall_custom` であり、`http_ratelimit` とは別 Phase です。
+6. Terraform で新規作成した場合も、次回の設定リビジョンで作成された Ruleset ID を `id` に記録します。`id` がないままでは、Cloudflare 側に Phase が存在するため次回の plan が重複作成として拒否されます。
 
 Provider の Ruleset import ID は `zones/<zone_id>/<ruleset_id>` です。`id` を指定した場合だけ `imports.tf` が import を適用します。
 
