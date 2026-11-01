@@ -58,6 +58,16 @@ override_resource {
 }
 
 override_resource {
+  target = module.zone.cloudflare_zone_setting.managed["hotlink_protection"]
+  values = {
+    id         = "hotlink_protection"
+    setting_id = "hotlink_protection"
+    zone_id    = "11111111111111111111111111111111"
+    value      = "off"
+  }
+}
+
+override_resource {
   target = module.zone.cloudflare_url_normalization_settings.managed[0]
   values = {
     id      = "11111111111111111111111111111111"
@@ -76,8 +86,33 @@ variables {
     paused = false
   }
   dns_records = {}
-  settings    = {}
-  rulesets    = {}
+  settings = {
+    ssl = {
+      setting_id = "ssl"
+      value_json = jsonencode("full")
+    }
+    always_use_https = {
+      setting_id = "always_use_https"
+      value_json = jsonencode("off")
+    }
+    min_tls_version = {
+      setting_id = "min_tls_version"
+      value_json = jsonencode("1.0")
+    }
+    tls_1_3 = {
+      setting_id = "tls_1_3"
+      value_json = jsonencode("off")
+    }
+    browser_check = {
+      setting_id = "browser_check"
+      value_json = jsonencode("off")
+    }
+    hotlink_protection = {
+      setting_id = "hotlink_protection"
+      value_json = jsonencode("off")
+    }
+  }
+  rulesets = {}
   web_baseline = {
     url_normalization = true
     dnssec            = false
@@ -99,6 +134,11 @@ run "apply_web_baseline" {
   }
 
   assert {
+    condition     = local.managed_settings["hotlink_protection"].value_json == jsonencode("off")
+    error_message = "Settings outside the baseline must be preserved."
+  }
+
+  assert {
     condition     = local.managed_url_normalization.scope == "incoming" && local.managed_url_normalization.type == "rfc3986"
     error_message = "The web baseline must normalize incoming URLs before WAF evaluation."
   }
@@ -106,22 +146,5 @@ run "apply_web_baseline" {
   assert {
     condition     = local.managed_dnssec == null
     error_message = "DNSSEC must remain disabled unless explicitly requested."
-  }
-}
-
-run "explicit_settings_are_overridden_by_baseline" {
-  command = plan
-  variables {
-    settings = {
-      ssl = {
-        setting_id = "ssl"
-        value_json = jsonencode("full")
-      }
-    }
-  }
-
-  assert {
-    condition     = local.managed_settings["ssl"].value_json == jsonencode("strict")
-    error_message = "The web baseline must take precedence over legacy explicit settings."
   }
 }
