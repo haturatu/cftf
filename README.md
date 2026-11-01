@@ -62,10 +62,10 @@ Zone の違いは非公開の入力値と state キーだけです。`zone-001` 
 
 | 機能 | Free プランの範囲 | Terraform |
 | --- | --- | --- |
-| Cloudflare Free Managed Ruleset | 既知の重大脆弱性を自動防御 | 自動適用。上書きする場合だけ `managed_rulesets` で既存 ID を import |
+| Cloudflare Free Managed Ruleset | 既知の重大脆弱性を自動防御 | 自動適用。上書きする場合だけ `managed_entrypoints` で Phase エントリーポイントを import |
 | WAF Custom Rules | 5 ルール / Zone | `rulesets` の `http_request_firewall_custom` |
 | WAF Rate Limiting | 1 ルール / Zone、10 秒 | `rulesets` の `http_ratelimit` |
-| HTTP DDoS Protection | 自動防御 | 原則不要。上書きする場合だけ `managed_rulesets` の `ddos_l7` |
+| HTTP DDoS Protection | 自動防御 | 原則不要。上書きする場合だけ `managed_entrypoints` の `ddos_l7` |
 | IP Access Rules | 50,000 件 / Account | `access_rules` |
 | IP Custom Lists | 1 リスト / Account | `stacks/security-account` の `ip_lists` |
 | User Agent Blocking | 10 件 / Zone | `user_agent_blocking_rules` |
@@ -89,7 +89,11 @@ Zone の違いは非公開の入力値と state キーだけです。`zone-001` 
 | Security Analytics / Events | 無料の分析機能 | Terraform 管理対象外 |
 | Cloudflare Access / Tunnel | 無料枠あり | 既存の `stacks/f2b` などで管理 |
 
-Free Managed Ruleset と HTTP DDoS Protection は Cloudflare が自動で有効化します。Terraform で再作成する必要はありません。ルールの上書きや無効化が必要な場合だけ、`managed_rulesets` に既存の管理ルールセット ID を指定して import します。通常の Custom Rules は `rulesets` を使います。
+Free Managed Ruleset と HTTP DDoS Protection は Cloudflare が自動で有効化します。Terraform で再作成する必要はありません。ルールの上書きや無効化が必要な場合だけ、Phase の Zone エントリーポイント（`kind = "zone"`）を `managed_entrypoints` で管理します。`id` は管理ルールセット本体（`kind = "managed"`）ではなく、Zone エントリーポイント Ruleset の ID です。`rules_json` には管理ルールセット ID を `action_parameters.id` に持つ `execute` ルールを記述します。空の `rules_json` は管理ルールセットの実行を消すおそれがあるため、モジュールが拒否します。通常の Custom Rules は `rulesets` を使います。
+
+Free Managed Ruleset は自動適用されるため、通常は `managed_entrypoints` を作成する必要はありません。カスタマイズする場合も、まず既存の Phase エントリーポイントの有無を確認し、存在する場合は import して無変更 plan を確認してください。エントリーポイントが存在しない場合の新規作成は、管理ルールセットが二重実行されないことを非公開環境で確認してから行います。
+
+DNSSEC は Cloudflare 側の有効化だけでは信頼チェーンが完成しません。apply 後に `dnssec_ds` 出力をレジストラへ登録し、`dig +dnssec` などで到達性を確認してください。この確認は Terraform や CI の範囲外です。
 
 ### WAF Custom Rules と Rate Limiting
 
@@ -114,7 +118,7 @@ module "zone" {
         {
           ref         = "block_nonstandard_ports"
           description = "Block non-standard HTTP ports"
-          expression  = "not (http.request.uri.port in {80 443})"
+          expression  = "not (cf.edge.server_port in {80 443})"
           action      = "block"
           enabled     = true
         },
@@ -124,7 +128,7 @@ module "zone" {
 }
 ```
 
-Rate Limiting は 1 Zone に 1 ルール、`period` と `mitigation_timeout` は 10 秒です。`requests_per_period` は API の実利用量に合わせて調整します。
+Rate Limiting は 1 Zone に 1 ルール、`period` は 10 秒です。`characteristics` には `cf.colo.id` が必須です。`requests_per_period` は API の実利用量に合わせて調整します。`block` / `log` は `mitigation_timeout = 10`、`challenge` / `js_challenge` / `managed_challenge` は Free プランの request throttling により `mitigation_timeout = 0` を指定します。
 
 ```hcl
 rulesets = {
@@ -153,7 +157,9 @@ rulesets = {
 
 `bot_management.fight_mode` はブラウザーで利用する Web サイト向けです。REST API が中心の Zone では無効にし、WAF、Cloudflare Access、Rate Limiting を組み合わせます。Bot Fight Mode は WAF の Skip ルールでは除外できません。
 
-AI クローラー対策は `ai_bots_protection`、`crawler_protection`、`is_robots_txt_managed` で設定します。`ai_training`、`ai_user`、`aisearch`、`cf_robots_variant` を使うと、管理 robots.txt のポリシーを細かく指定できます。
+AI クローラー対策は `ai_bots_protection`、`crawler_protection`、`is_robots_txt_managed` で設定します。`ai_training`、`ai_user`、`aisearch`、`cf_robots_variant`、`bot_preference_sync_enabled` を使うと、管理 robots.txt のポリシーを細かく指定できます。
+
+`bot_management` は Free プランで利用できる設定だけを公開します。Super Bot Fight Mode、Bot Management の ML スコア、`jsd_api_results_enabled`、`auto_update_model`、`bm_cookie_enabled`、`suppress_session_score`、`optimize_wordpress` などは有料プラン向けのため含めていません。JavaScript Detections は Bot Fight Mode 有効時に自動で有効になり、Free では個別に無効化できません。
 
 Turnstile は Cloudflare の DNS や WAF とは独立して、ログイン、登録、問い合わせ、フォーム送信だけを保護できます。サイト全体の Bot Fight Mode を有効にしたくない場合に適しています。
 
@@ -210,14 +216,15 @@ Cloudflare の Zone では、同じ Phase のエントリーポイントルー�
 
 `stacks/f2b` は対象 Zone の `http_request_firewall_custom` を所有し、API クライアント向けの BIC Skip ルールを管理します。同じ Zone を `stacks/zone` でも管理する場合、`stacks/zone` 側に同じ Phase のルールセットを追加しないでください。
 
-所有権を `stacks/zone` へ移す場合は、次の順序で行います。
+所有権を `stacks/zone` へ移す場合は、二重管理の期間を作らないために次の順序で行います。
 
-1. Cloudflare API または既存 state から、対象の `http_request_firewall_custom` ルールセット ID を取得する。
-2. `stacks/zone` の非公開設定に、その ID と現在のルールを含む `rulesets` エントリを追加する。
-3. `stacks/zone` を plan し、変更がないことを確認してから apply する。
-4. `stacks/f2b` の state から `cloudflare_ruleset.api_browser_checks[0]` を削除し、`manage_api_browser_check = false` を設定する。削除は Private 環境で `terraform state rm 'cloudflare_ruleset.api_browser_checks[0]'` を実行する。
+1. 両スタックの自動 apply を停止する。
+2. Cloudflare API または既存 state から、対象の `http_request_firewall_custom` ルールセット ID を取得する。
+3. `stacks/f2b` で `manage_api_browser_check = false` を設定し、Private 環境で `terraform state rm 'cloudflare_ruleset.api_browser_checks[0]'` を実行する。API 上のルールは削除しない。
+4. `stacks/zone` の非公開設定に、その ID と現在のルールを含む `rulesets` エントリを追加する。
+5. `stacks/zone` を plan し、無変更であることを確認してから apply する。
 
-`stacks/f2b` のリソースには `prevent_destroy` を付けています。手順を誤って削除しようとすると plan が失敗します。`imports.tf` は、既存リソースの `id` を指定した場合だけ import し、新規作成するリソースには import を適用しません。
+`stacks/zone` は `cloudflare_rulesets` データソースで既存の Zone エントリーポイントを検出し、`id` なしの重複作成を plan 時に拒否します。データソースだけでは別 state の所有権までは判定できないため、移管時は自動 apply を停止し、上記の順序を守ってください。`stacks/f2b` のリソースには `prevent_destroy` を付けています。手順を誤って削除しようとすると plan が失敗します。`imports.tf` は、既存リソースの `id` を指定した場合だけ import し、新規作成するリソースには import を適用しません。Provider v5.28.1 の Ruleset import ID は `zones/<zone_id>/<ruleset_id>` です。
 
 ### Free プランで使えないもの
 
@@ -256,6 +263,8 @@ stacks/security-account/
 ```
 
 Free プランでは IP リストは 1 つ、Turnstile は 20 ウィジェットまでです。IP リストの `name` は WAF の式から `ip.src in $allowed_ips` のように参照します。既存のリストやウィジェットを管理する場合は、`import_id` にリスト ID または sitekey を指定します。
+
+既存 IP リストを import するときは `items` を省略してください。Provider v5.28.1 では `items` を指定するとリスト全体を上書きするため、省略時は既存項目を維持し、明示的な空配列だけが全削除になります。Turnstile の Enterprise 専用設定（`bot_fight_mode`、`ephemeral_id`、`offlabel`）は Free 向けモジュールでは公開していません。
 
 Turnstile の secret は Terraform state に保存されます。state は非公開 R2 で管理し、ログや plan を公開しないでください。`examples/security-account.tfvars.json.example` に最小構成の例があります。
 

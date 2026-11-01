@@ -11,8 +11,9 @@
 | `dns_records` | `map(object)` | この Zone に属する既存 DNS レコード |
 | `settings` | `map(object)` | 設定 ID と JSON 文字列の値 |
 | `rulesets` | `map(object)` | 利用者が所有する Zone ルールセット。`id` を省略すると新規作成、指定すると import |
-| `managed_rulesets` | `map(object)` | Free Managed Ruleset や L7 DDoS など、Cloudflare 管理ルールセットの上書き。既存 `id` が必須 |
-| `bot_management` | `object` | Bot Fight Mode、AI Bot 遮断、AI Labyrinth、管理 robots.txt |
+| `managed_entrypoints` | `map(object)` | Free Managed Ruleset や L7 DDoS を実行する Zone エントリーポイント。`id` は管理ルールセット本体ではなく、Phase エントリーポイントの ID |
+| `existing_zone_ruleset_phases` | `set(string)` | 既存 Zone エントリーポイントの Phase。`id` なしの重複作成を plan 時に拒否するために使う |
+| `bot_management` | `object` | Free 向けの Bot Fight Mode、AI Bot 遮断、AI Labyrinth、管理 robots.txt |
 | `url_normalization` | `object` | WAF 評価前の URL 正規化 |
 | `dnssec` | `object` | DNSSEC の有効化状態 |
 | `managed_transforms` | `object` | セキュリティヘッダーや漏洩資格情報ヘッダーの Managed Transform |
@@ -31,14 +32,20 @@
 
 `rulesets.rules_json` は JSON 配列を指定します。`id` を省略した場合は新しい Zone ルールセットを作成します。同じ Phase のエントリーポイントを複数管理することはできません。
 
-`managed_rulesets` は Cloudflare が作成したルールセットを import して上書きする場合だけ使います。Terraform で新規作成することはありません。
+`managed_entrypoints` は Cloudflare が作成した管理ルールセットを実行・上書きする Zone の Phase エントリーポイント（`kind = "zone"`）です。`id` は管理ルールセット本体（`kind = "managed"`）ではなく、Zone の Phase エントリーポイント Ruleset の ID を指定します。`rules_json` には管理ルールセット ID を `action_parameters.id` に持つ `execute` ルールを記述します。空の `rules_json` は管理ルールセットの実行を消すおそれがあるため拒否します。Free Managed Ruleset は自動適用されるため、既存の Phase エントリーポイントがある場合は必ず import し、新規作成は二重実行の有無を非公開環境で確認してから行います。
+
+既存の Zone エントリーポイントがある場合は `existing_zone_ruleset_phases` により、`id` なしの重複作成を plan 時に拒否します。`stacks/zone` は `cloudflare_rulesets` データソースからこの値を設定します。
+
+DNSSEC を有効化した場合、apply 後の `dnssec_ds` 出力をレジストラへ登録し、`dig +dnssec` などで到達性を確認してください。Cloudflare 側の有効化だけでは DNSSEC の信頼チェーンは完成しません。
 
 ## Free プランの上限
 
 モジュールは代表的な Free プランの上限を検証します。
 
 - Custom WAF ルール: 1 Zone あたり 5 ルール
-- Rate Limiting: 1 Zone あたり 1 ルール、`period` と `mitigation_timeout` は 10 秒
+- Rate Limiting: 1 Zone あたり 1 ルール、`period` は 10 秒、`characteristics` に `cf.colo.id` が必須
+  - `block` / `log`: `mitigation_timeout = 10`
+  - `challenge` / `js_challenge` / `managed_challenge`: `mitigation_timeout = 0`（request throttling）
 - User-Agent Blocking: 1 Zone あたり 10 ルール
 
 上限はプラン変更や Cloudflare 側の仕様変更で変わる可能性があります。apply 前に非公開環境の plan を確認してください。
