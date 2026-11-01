@@ -76,7 +76,7 @@ Zone の違いは非公開の入力値と state キーだけです。`zone-001` 
 | AI Labyrinth | AI クローラー向けリンク迷路 | `bot_management.crawler_protection` |
 | Managed robots.txt | AI クローラーへのポリシー提示 | `bot_management.is_robots_txt_managed` |
 | Turnstile | 20 ウィジェット / Account | `stacks/security-account` の `turnstile_widgets` |
-| URL Normalization | WAF 評価前の URL 正規化 | `url_normalization` |
+| URL Normalization | WAF 評価前の URL 正規化。アカウント / Zone で利用可能な場合のみ | `url_normalization` |
 | DNSSEC | DNS 応答の改ざん対策 | `dnssec` |
 | Managed Transforms | セキュリティヘッダー等 | `managed_transforms` |
 | Authenticated Origin Pulls | Cloudflare 経由の mTLS 確認 | `authenticated_origin_pulls` |
@@ -105,7 +105,7 @@ DNSSEC は Cloudflare 側の有効化だけでは信頼チェーンが完成し�
 ```json
 {
   "web_baseline": {
-    "url_normalization": true,
+    "url_normalization": false,
     "dnssec": false
   }
 }
@@ -120,7 +120,8 @@ DNSSEC は Cloudflare 側の有効化だけでは信頼チェーンが完成し�
 | `min_tls_version` | `1.2` |
 | `tls_1_3` | `on` |
 | `browser_check` | `on` |
-| `url_normalization` | `incoming` / `rfc3986` |
+
+`url_normalization = true` は、Cloudflare アカウント / Zone で URL Normalization が表示・利用でき、API トークンが必要な権限を持つ場合だけ有効にします。現在の環境では URL Normalization API が `403` になるため、既定値は `false` です。
 
 `dnssec = true` も指定できますが、Cloudflare 側の有効化後にレジストラへ DS レコードを登録し、`dig +dnssec` で確認してください。
 
