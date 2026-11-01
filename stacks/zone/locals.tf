@@ -28,7 +28,7 @@ locals {
   managed_settings = merge(local.filtered_settings, local.web_baseline_settings)
   managed_url_normalization = (
     var.web_baseline != null && var.web_baseline.url_normalization
-    ? { scope = "incoming", type = "rfc3986" }
+    ? { scope = "incoming", type = "cloudflare" }
     : var.url_normalization
   )
   managed_dnssec = (

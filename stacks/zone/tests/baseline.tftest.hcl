@@ -73,7 +73,7 @@ override_resource {
     id      = "11111111111111111111111111111111"
     zone_id = "11111111111111111111111111111111"
     scope   = "incoming"
-    type    = "rfc3986"
+    type    = "cloudflare"
   }
 }
 
@@ -139,7 +139,7 @@ run "apply_web_baseline" {
   }
 
   assert {
-    condition     = local.managed_url_normalization.scope == "incoming" && local.managed_url_normalization.type == "rfc3986"
+    condition     = local.managed_url_normalization.scope == "incoming" && local.managed_url_normalization.type == "cloudflare"
     error_message = "The web baseline must normalize incoming URLs before WAF evaluation."
   }
 
