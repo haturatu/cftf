@@ -358,3 +358,12 @@ variable "zone" {
     error_message = "zone must have a name and a supported type."
   }
 }
+
+variable "web_baseline" {
+  description = "Apply the Free-plan baseline for browser-facing websites. Proxying, HTTP/L3/L4 DDoS protection, and the Free Managed Ruleset are automatic and are not managed here. Enable url_normalization only when it is available for the account and zone."
+  type = object({
+    dnssec            = optional(bool, false)
+    url_normalization = optional(bool, false)
+  })
+  default = null
+}

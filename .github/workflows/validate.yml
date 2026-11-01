@@ -39,3 +39,4 @@ jobs:
           terraform -chdir=modules/account-security test
           terraform -chdir=bootstrap/backend test
           terraform -chdir=stacks/f2b test
+          terraform -chdir=stacks/zone test

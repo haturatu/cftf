@@ -72,7 +72,7 @@ module "zone" {
   }
   url_normalization = {
     scope = "incoming"
-    type  = "rfc3986"
+    type  = "cloudflare"
   }
   managed_transforms = {
     response_headers = [

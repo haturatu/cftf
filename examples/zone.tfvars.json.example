@@ -10,6 +10,10 @@
   "settings": {},
   "rulesets": {},
   "managed_entrypoints": {},
+  "web_baseline": {
+    "dnssec": false,
+    "url_normalization": false
+  },
   "bot_management": {
     "fight_mode": true,
     "ai_bots_protection": "block",
@@ -17,10 +21,7 @@
     "is_robots_txt_managed": true,
     "bot_preference_sync_enabled": true
   },
-  "url_normalization": {
-    "scope": "incoming",
-    "type": "rfc3986"
-  },
+  "url_normalization": null,
   "dnssec": {
     "status": "active"
   },

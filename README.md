@@ -5,6 +5,7 @@
 - [Cloudflare の Terraform 管理](#cloudflare-%E3%81%AE-terraform-%E7%AE%A1%E7%90%86)
   - [構成](#%E6%A7%8B%E6%88%90)
   - [Free プランのセキュリティ機能](#free-%E3%83%97%E3%83%A9%E3%83%B3%E3%81%AE%E3%82%BB%E3%82%AD%E3%83%A5%E3%83%AA%E3%83%86%E3%82%A3%E6%A9%9F%E8%83%BD)
+    - [Web サイト向けベースライン](#web-%E3%82%B5%E3%82%A4%E3%83%88%E5%90%91%E3%81%91%E3%83%99%E3%83%BC%E3%82%B9%E3%83%A9%E3%82%A4%E3%83%B3)
     - [WAF Custom Rules と Rate Limiting](#waf-custom-rules-%E3%81%A8-rate-limiting)
     - [Bot 対策](#bot-%E5%AF%BE%E7%AD%96)
     - [TLS とセキュリティヘッダー](#tls-%E3%81%A8%E3%82%BB%E3%82%AD%E3%83%A5%E3%83%AA%E3%83%86%E3%82%A3%E3%83%98%E3%83%83%E3%83%80%E3%83%BC)
@@ -75,7 +76,7 @@ Zone の違いは非公開の入力値と state キーだけです。`zone-001` 
 | AI Labyrinth | AI クローラー向けリンク迷路 | `bot_management.crawler_protection` |
 | Managed robots.txt | AI クローラーへのポリシー提示 | `bot_management.is_robots_txt_managed` |
 | Turnstile | 20 ウィジェット / Account | `stacks/security-account` の `turnstile_widgets` |
-| URL Normalization | WAF 評価前の URL 正規化 | `url_normalization` |
+| URL Normalization | WAF 評価前の URL 正規化。アカウント / Zone で利用可能な場合のみ | `url_normalization` |
 | DNSSEC | DNS 応答の改ざん対策 | `dnssec` |
 | Managed Transforms | セキュリティヘッダー等 | `managed_transforms` |
 | Authenticated Origin Pulls | Cloudflare 経由の mTLS 確認 | `authenticated_origin_pulls` |
@@ -96,6 +97,40 @@ Free Managed Ruleset と HTTP DDoS Protection は Cloudflare が自動で有効�
 Free Managed Ruleset は自動適用されるため、通常は `managed_entrypoints` を作成する必要はありません。カスタマイズする場合も、まず既存の Phase エントリーポイントの有無を確認し、存在する場合は import して無変更 plan を確認してください。エントリーポイントが存在しない場合の新規作成は、管理ルールセットが二重実行されないことを非公開環境で確認してから行います。
 
 DNSSEC は Cloudflare 側の有効化だけでは信頼チェーンが完成しません。apply 後に `dnssec_ds` 出力をレジストラへ登録し、`dig +dnssec` などで到達性を確認してください。この確認は Terraform や CI の範囲外です。
+
+### Web サイト向けベースライン
+
+ブラウザー向け Web サイトの基本構成は `stacks/zone` の `web_baseline` でまとめて有効化できます。
+
+```json
+{
+  "web_baseline": {
+    "url_normalization": false,
+    "dnssec": false
+  }
+}
+```
+
+`web_baseline` を指定すると、次の Zone 設定を管理します。既存の `settings` に同じ `setting_id` がある場合はベースライン値が優先されます。
+
+| 設定 | 値 |
+| --- | --- |
+| `ssl` | `strict`（Full (strict)） |
+| `always_use_https` | `on` |
+| `min_tls_version` | `1.2` |
+| `tls_1_3` | `on` |
+| `browser_check` | `on` |
+
+`url_normalization = true` は、Cloudflare アカウント / Zone で URL Normalization が表示・利用でき、API トークンが必要な権限を持つ場合だけ有効にします。URL Normalization API には「URL Normalization」という専用の権限グループはなく、Zone スコープの **`Sanitize Read`**（plan）と **`Sanitize Write`**（apply）で許可されます。`Zone Transform Rules` や `Zone WAF` では 403 になります。ベースラインでは `incoming` / `cloudflare` を管理します。
+
+`dnssec = true` も指定できますが、Cloudflare 側の有効化後にレジストラへ DS レコードを登録し、`dig +dnssec` で確認してください。
+
+以下は自動適用またはダッシュボード機能のため、Terraform では作成しません。
+
+- Cloudflare Proxy: DNS レコードの Proxied 設定を確認してください。DNS Only のホスト名は HTTP WAF の保護対象外です。
+- HTTP DDoS / L3/L4 DDoS: 自動適用
+- Cloudflare Free Managed Ruleset: 自動適用
+- Security Analytics / Security Events: ダッシュボードで確認
 
 ### WAF Custom Rules と Rate Limiting
 
@@ -384,6 +419,7 @@ terraform -chdir=modules/account-security init -backend=false -input=false
 terraform -chdir=modules/account-security test
 terraform -chdir=bootstrap/backend init -backend=false -input=false
 terraform -chdir=bootstrap/backend test
+terraform -chdir=stacks/zone test
 ```
 
 Workflow の `queue: max` は actionlint `1.7.12` が認識しないため、その警告だけを除外します。
