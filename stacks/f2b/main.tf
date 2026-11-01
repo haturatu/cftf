@@ -7,8 +7,9 @@ resource "cloudflare_zero_trust_organization" "managed" {
   lifecycle { prevent_destroy = true }
 }
 resource "cloudflare_d1_database" "managed" {
-  account_id = var.account_id
-  name       = var.database_name
+  account_id       = var.account_id
+  name             = var.database_name
+  read_replication = { mode = "disabled" }
   lifecycle { prevent_destroy = true }
 }
 resource "cloudflare_zero_trust_access_service_token" "source" {
@@ -23,7 +24,7 @@ resource "cloudflare_workers_script" "managed" {
   for_each           = var.workers
   account_id         = var.account_id
   script_name        = each.value.name
-  content_file       = each.value.source_path
+  content            = file(each.value.source_path)
   content_sha256     = filesha256(each.value.source_path)
   main_module        = basename(each.value.source_path)
   compatibility_date = "2026-10-31"
