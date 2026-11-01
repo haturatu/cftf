@@ -25,6 +25,10 @@ run "free_api_is_separate_from_protected_ingestion" {
     error_message = "Only ingestion is protected using a Service Auth policy."
   }
   assert {
+    condition     = length(cloudflare_zero_trust_access_application.source) == 2 && alltrue([for application in cloudflare_zero_trust_access_application.source : length(application.policies[0].include) == 1 && application.policies[0].decision == "non_identity"])
+    error_message = "Each source path must allow only its assigned service token."
+  }
+  assert {
     condition     = alltrue([for worker in cloudflare_workers_script.managed : worker.usage_model == "standard"])
     error_message = "Avoid container and paid compute resources."
   }

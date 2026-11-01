@@ -189,6 +189,6 @@ R2 に S3 のバージョニング機能はないため、state、bootstrap の�
 
 `stacks/f2b` は公開 API と収集 Worker、D1、Access の組織・Service Token・収集ポリシーを管理します。新規の `f2b` ターゲットは専用 state を使用し、既存 Worker と Zone の state を共有しません。アプリケーションのソースは公開 `f2b-api` リポジトリで管理し、ビルド結果とデプロイ設定を非公開 R2 の新しいリビジョンへ格納します。
 
-両 Worker の `workers.dev` とプレビュー URL を無効にし、収集ドメインを Service Auth で保護します。収集元ごとに Service Token を発行し、API は Cloudflare が検証したサービス ID と設定上の Jail 範囲を照合します。認証用の Secret は Terraform state と各収集サーバーの保護された設定だけに保存します。D1 のスキーマ変更は `f2b-api/migrations` を適用します。
+両 Worker の `workers.dev` とプレビュー URL を無効にし、収集ドメインを Service Auth で保護します。収集元ごとに Service Token を発行し、API は Cloudflare が検証した Access アプリケーション AUD と設定上の Jail 範囲を照合します。認証用の Secret は Terraform state と各収集サーバーの保護された設定だけに保存します。D1 のスキーマ変更は `f2b-api/migrations` を適用します。
 
 固定 Provider の組織リソースは初期作成にも更新 API を使います。Access が未有効なアカウントでは、一度だけ管理 API で組織を初期化し、返された `auth_domain` を非公開の入力値へ保存してから適用します。組織の有効化後は同じリソースが既存組織の設定を管理します。

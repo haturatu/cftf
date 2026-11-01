@@ -32,8 +32,8 @@ resource "cloudflare_workers_script" "managed" {
     { name = "DB", type = "d1", id = cloudflare_d1_database.managed.id },
     { name = "STALE_SECONDS", type = "plain_text", text = "172800" }
     ], each.key == "ingest" ? [{
-      name = "SOURCE_TOKENS", type = "json", json = jsonencode({
-        for name, source in var.sources : cloudflare_zero_trust_access_service_token.source[name].client_id => { source = name, jails = sort(tolist(source.jails)) }
+      name = "SOURCE_SCOPES", type = "json", json = jsonencode({
+        for name, source in var.sources : cloudflare_zero_trust_access_application.source[name].aud => { source = name, jails = sort(tolist(source.jails)) }
       })
   }] : [], each.key == "api" ? [{ name = "READ_LIMITER", type = "ratelimit", namespace_id = "1001", simple = { limit = 120, period = 60 } }] : [])
   lifecycle { prevent_destroy = true }
@@ -76,7 +76,7 @@ output "collector_credentials" {
   sensitive = true
   value = { for name, token in cloudflare_zero_trust_access_service_token.source : name => {
     source   = name, client_id = token.client_id, client_secret = token.client_secret,
-    endpoint = "https://${var.workers["ingest"].hostname}/v1/ingest/snapshot"
+    endpoint = "https://${var.workers["ingest"].hostname}/v1/ingest/snapshot/${name}"
   } }
 }
 
@@ -93,6 +93,22 @@ resource "cloudflare_ruleset" "api_browser_checks" {
     description       = "REST clients do not require browser integrity checks"
     enabled           = true
     logging           = { enabled = true }
+  }]
+  lifecycle { prevent_destroy = true }
+}
+
+resource "cloudflare_zero_trust_access_application" "source" {
+  for_each                  = var.sources
+  account_id                = var.account_id
+  name                      = "Fail2ban ${each.key} ingestion"
+  domain                    = "${var.workers["ingest"].hostname}/v1/ingest/snapshot/${each.key}"
+  type                      = "self_hosted"
+  app_launcher_visible      = false
+  session_duration          = "24h"
+  service_auth_401_redirect = false
+  policies = [{
+    name    = "Assigned collection service", decision = "non_identity", precedence = 1,
+    include = [{ service_token = { token_id = cloudflare_zero_trust_access_service_token.source[each.key].id } }]
   }]
   lifecycle { prevent_destroy = true }
 }
