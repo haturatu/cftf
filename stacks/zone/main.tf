@@ -3,7 +3,7 @@ module "zone" {
   account_id  = var.account_id
   zone        = var.zone
   dns_records = var.dns_records
-  settings    = var.settings
+  settings    = local.managed_settings
   rulesets    = var.rulesets
 
   managed_entrypoints = var.managed_entrypoints
@@ -13,8 +13,8 @@ module "zone" {
   ])
 
   bot_management             = var.bot_management
-  url_normalization          = var.url_normalization
-  dnssec                     = var.dnssec
+  url_normalization          = local.managed_url_normalization
+  dnssec                     = local.managed_dnssec
   managed_transforms         = var.managed_transforms
   leaked_credential_check    = var.leaked_credential_check
   authenticated_origin_pulls = var.authenticated_origin_pulls

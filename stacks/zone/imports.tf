@@ -3,7 +3,7 @@ import {
   id = var.zone.id
 }
 import {
-  for_each = var.settings
+  for_each = local.managed_settings
   to       = module.zone.cloudflare_zone_setting.managed[each.key]
   id       = "${var.zone.id}/${each.value.setting_id}"
 }
@@ -28,12 +28,12 @@ import {
   id       = var.zone.id
 }
 import {
-  for_each = var.url_normalization == null ? {} : { managed = true }
+  for_each = local.managed_url_normalization == null ? {} : { managed = true }
   to       = module.zone.cloudflare_url_normalization_settings.managed[0]
   id       = var.zone.id
 }
 import {
-  for_each = var.dnssec == null ? {} : { managed = true }
+  for_each = local.managed_dnssec == null ? {} : { managed = true }
   to       = module.zone.cloudflare_zone_dnssec.managed[0]
   id       = var.zone.id
 }

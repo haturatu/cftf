@@ -10,6 +10,10 @@
   "settings": {},
   "rulesets": {},
   "managed_entrypoints": {},
+  "web_baseline": {
+    "dnssec": false,
+    "url_normalization": true
+  },
   "bot_management": {
     "fight_mode": true,
     "ai_bots_protection": "block",
