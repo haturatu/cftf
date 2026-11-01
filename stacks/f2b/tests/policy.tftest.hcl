@@ -1,7 +1,7 @@
 mock_provider "cloudflare" {}
 run "free_api_is_separate_from_protected_ingestion" {
   variables {
-    account_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    account_id   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     zone_id      = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     api_hostname = "api.example.com"
     workers = {
