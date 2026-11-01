@@ -32,4 +32,8 @@ run "free_api_is_separate_from_protected_ingestion" {
     condition     = cloudflare_ruleset.api_browser_checks.phase == "http_request_firewall_custom"
     error_message = "Keep the API BIC skip rule owned by this stack until the zone stack imports it."
   }
+  assert {
+    condition     = length(cloudflare_ruleset.api_browser_checks) == 1
+    error_message = "Keep the API BIC skip rule owned by this stack until the zone stack imports it."
+  }
 }

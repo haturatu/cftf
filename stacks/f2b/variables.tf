@@ -38,3 +38,8 @@ variable "access_organization" {
   type    = object({ name = string, auth_domain = string })
   default = null
 }
+variable "manage_api_browser_check" {
+  description = "Keep the API BIC skip rule owned by this stack. Set to false only after the same http_request_firewall_custom ruleset has been imported by the zone stack."
+  type        = bool
+  default     = true
+}
