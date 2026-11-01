@@ -10,7 +10,7 @@ resource "cloudflare_ruleset" "managed" {
   lifecycle {
     precondition {
       condition     = each.value.id != null || !contains(var.existing_zone_ruleset_phases, each.value.phase)
-      error_message = "A zone entrypoint ruleset already exists for phase ${each.value.phase}. Import its existing id instead of creating a duplicate."
+      error_message = "A zone entrypoint ruleset already exists for phase ${each.value.phase}. Set its existing id in the configuration, including a ruleset created by Terraform, instead of creating a duplicate."
     }
   }
 }
@@ -31,7 +31,7 @@ resource "cloudflare_ruleset" "managed_entrypoint" {
     prevent_destroy = true
     precondition {
       condition     = each.value.id != null || !contains(var.existing_zone_ruleset_phases, each.value.phase)
-      error_message = "A zone entrypoint ruleset already exists for phase ${each.value.phase}. Import its existing id instead of creating a duplicate."
+      error_message = "A zone entrypoint ruleset already exists for phase ${each.value.phase}. Set its existing id in the configuration, including a ruleset created by Terraform, instead of creating a duplicate."
     }
   }
 }
