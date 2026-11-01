@@ -30,9 +30,9 @@
 
 `settings.value_json` は JSON として有効かつ非 null の値を指定します。TLS やブラウザーチェックなどの Zone 設定は、既存の `settings` に `setting_id` と `value_json` を追加します。
 
-`rulesets.rules_json` は JSON 配列を指定します。`id` を省略した場合は新しい Zone ルールセットを作成します。同じ Phase のエントリーポイントを複数管理することはできません。
+`rulesets.rules_json` は JSON 配列を指定します。`id` を省略した場合は新しい Zone ルールセットを作成します。同じ Phase のエントリーポイントを複数管理することはできません。`http_request_firewall_managed`、`http_response_firewall_managed`、`ddos_l7` は `managed_entrypoints` 専用とし、`rulesets` では拒否します。
 
-`managed_entrypoints` は Cloudflare が作成した管理ルールセットを実行・上書きする Zone の Phase エントリーポイント（`kind = "zone"`）です。`id` は管理ルールセット本体（`kind = "managed"`）ではなく、Zone の Phase エントリーポイント Ruleset の ID を指定します。`rules_json` には管理ルールセット ID を `action_parameters.id` に持つ `execute` ルールを記述します。空の `rules_json` は管理ルールセットの実行を消すおそれがあるため拒否します。Free Managed Ruleset は自動適用されるため、既存の Phase エントリーポイントがある場合は必ず import し、新規作成は二重実行の有無を非公開環境で確認してから行います。
+`managed_entrypoints` は Cloudflare が作成した管理ルールセットを実行・上書きする Zone の Phase エントリーポイント（`kind = "zone"`）です。`id` は管理ルールセット本体（`kind = "managed"`）ではなく、Zone の Phase エントリーポイント Ruleset の ID を指定します。`rules_json` には管理ルールセット ID を `action_parameters.id` に持つ `execute` ルールを記述します。空の `rules_json` は管理ルールセットの実行を消すおそれがあるため拒否します。少なくとも 1 件の有効な `execute` ルール（`expression` と 32 文字の `action_parameters.id`）を必須とし、無条件の `skip` ルール（`expression = "true"`）も拒否します。`action_parameters.id` は Cloudflare API の rulesets 一覧で、対象プランで利用できる管理 Ruleset の ID を確認してください。Free Managed Ruleset は自動適用されるため、既存の Phase エントリーポイントがある場合は必ず import し、新規作成は二重実行の有無を非公開環境で確認してから行います。
 
 既存の Zone エントリーポイントがある場合は `existing_zone_ruleset_phases` により、`id` なしの重複作成を plan 時に拒否します。`stacks/zone` は `cloudflare_rulesets` データソースからこの値を設定します。
 

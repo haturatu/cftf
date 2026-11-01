@@ -89,7 +89,9 @@ Zone の違いは非公開の入力値と state キーだけです。`zone-001` 
 | Security Analytics / Events | 無料の分析機能 | Terraform 管理対象外 |
 | Cloudflare Access / Tunnel | 無料枠あり | 既存の `stacks/f2b` などで管理 |
 
-Free Managed Ruleset と HTTP DDoS Protection は Cloudflare が自動で有効化します。Terraform で再作成する必要はありません。ルールの上書きや無効化が必要な場合だけ、Phase の Zone エントリーポイント（`kind = "zone"`）を `managed_entrypoints` で管理します。`id` は管理ルールセット本体（`kind = "managed"`）ではなく、Zone エントリーポイント Ruleset の ID です。`rules_json` には管理ルールセット ID を `action_parameters.id` に持つ `execute` ルールを記述します。空の `rules_json` は管理ルールセットの実行を消すおそれがあるため、モジュールが拒否します。通常の Custom Rules は `rulesets` を使います。
+Free Managed Ruleset と HTTP DDoS Protection は Cloudflare が自動で有効化します。Terraform で再作成する必要はありません。ルールの上書きや無効化が必要な場合だけ、Phase の Zone エントリーポイント（`kind = "zone"`）を `managed_entrypoints` で管理します。`id` は管理ルールセット本体（`kind = "managed"`）ではなく、Zone エントリーポイント Ruleset の ID です。`rules_json` には管理ルールセット ID を `action_parameters.id` に持つ `execute` ルールを記述します。空の `rules_json` は管理ルールセットの実行を消すおそれがあるため、モジュールが拒否します。さらに、少なくとも 1 件の有効な `execute` ルール（`expression` と 32 文字の `action_parameters.id` を持つ）を必須とし、無条件の `skip` ルール（`expression = "true"`）も拒否します。通常の Custom Rules は `rulesets` を使います。
+
+`action_parameters.id` には、Free Managed Ruleset（2026-11-01 時点の例: `77454fe2d30c4220b5701f6fdfb893ba`）や L7 DDoS（同: `4d21379b4f9f4bb088e0729962c8b3cf`）など、対象プランで利用できる管理 Ruleset の ID を指定します。ID は Cloudflare API の rulesets 一覧で確認してください。
 
 Free Managed Ruleset は自動適用されるため、通常は `managed_entrypoints` を作成する必要はありません。カスタマイズする場合も、まず既存の Phase エントリーポイントの有無を確認し、存在する場合は import して無変更 plan を確認してください。エントリーポイントが存在しない場合の新規作成は、管理ルールセットが二重実行されないことを非公開環境で確認してから行います。
 
@@ -97,7 +99,7 @@ DNSSEC は Cloudflare 側の有効化だけでは信頼チェーンが完成し�
 
 ### WAF Custom Rules と Rate Limiting
 
-`rulesets` は既存ルールセットを import する場合は `id` を指定し、新規作成する場合は省略します。同じ Phase のエントリーポイントを複数管理することはできません。Free プランの 5 ルールを有効に使う例です。
+`rulesets` は既存ルールセットを import する場合は `id` を指定し、新規作成する場合は省略します。同じ Phase のエントリーポイントを複数管理することはできません。`http_request_firewall_managed`、`http_response_firewall_managed`、`ddos_l7` は Managed Ruleset の実行設定を消すおそれがあるため、通常の `rulesets` では管理せず `managed_entrypoints` を使います。Free プランの 5 ルールを有効に使う例です。
 
 ```hcl
 module "zone" {
@@ -226,6 +228,8 @@ Cloudflare の Zone では、同じ Phase のエントリーポイントルー�
 
 `stacks/zone` は `cloudflare_rulesets` データソースで既存の Zone エントリーポイントを検出し、`id` なしの重複作成を plan 時に拒否します。データソースだけでは別 state の所有権までは判定できないため、移管時は自動 apply を停止し、上記の順序を守ってください。`stacks/f2b` のリソースには `prevent_destroy` を付けています。手順を誤って削除しようとすると plan が失敗します。`imports.tf` は、既存リソースの `id` を指定した場合だけ import し、新規作成するリソースには import を適用しません。Provider v5.28.1 の Ruleset import ID は `zones/<zone_id>/<ruleset_id>` です。
 
+Terraform の検証は変数と plan の範囲です。WAF ルールの削除・無効化や管理 Ruleset の実行喪失を最終的に防ぐには、Private CI の plan 検査に「保護ルールの削除・無効化を拒否する」条件を追加してください。
+
 ### Free プランで使えないもの
 
 次の機能は Free プランの対象外です。Terraform の定義を追加しても API で失敗するため、採用しません。
@@ -262,7 +266,7 @@ stacks/security-account/
 └── versions.tf
 ```
 
-Free プランでは IP リストは 1 つ、Turnstile は 20 ウィジェットまでです。IP リストの `name` は WAF の式から `ip.src in $allowed_ips` のように参照します。既存のリストやウィジェットを管理する場合は、`import_id` にリスト ID または sitekey を指定します。
+Free プランでは IP リストは 1 つ、Turnstile は 20 ウィジェットまでです。IP リストの `name` は小文字英数字とアンダースコアの 1〜50 文字で指定し、WAF の式から `ip.src in $allowed_ips` のように参照します。1 リストあたり最大 10,000 項目です。IP は IPv4・IPv6・CIDR の実体として検証されます。既存のリストやウィジェットを管理する場合は、`import_id` にリスト ID または sitekey を指定します。
 
 既存 IP リストを import するときは `items` を省略してください。Provider v5.28.1 では `items` を指定するとリスト全体を上書きするため、省略時は既存項目を維持し、明示的な空配列だけが全削除になります。Turnstile の Enterprise 専用設定（`bot_fight_mode`、`ephemeral_id`、`offlabel`）は Free 向けモジュールでは公開していません。
 
