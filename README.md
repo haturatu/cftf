@@ -169,6 +169,10 @@ Private 側で plan を作り直し、検査した**保存済み plan** を適�
 
 既存の環境で特に気を付けたいのが state キーです。`terraform init -reconfigure` は backend を再設定するだけで、state の移行は行いません。間違ったキーで空の state を見てしまうと、すでに存在するリソースを新しく作ろうとする場合があります。
 
+通常の本番反映は、次の「GitHub Actions で反映する」にある PR ラベル経由の CI/CD を使用します。ローカルの `apply` は復旧・緊急時だけに限定し、通常はローカルで `plan` の内容を確認してから CI/CD の apply を実行してください。
+
+**警告:** `apply` を試すために実際の Zone を新規ターゲットへ割り当てたり、別の state キーへ切り替えたりしないでください。既存資源の削除・更新を引き起こす可能性があります。
+
 **初回の取り込みや移管では、正しい state を見ているか、ほかの state が同じリソースを所有していないか、必ず plan で確認してください。**
 
 ## GitHub Actions で反映する
@@ -339,9 +343,37 @@ Free の上限は Zone あたり 5 ルールです。既存ルールを別の Te
 
 ### Rate Limiting
 
-API を公開する場合、WAF だけでなくリクエスト数を制限したいこともあります。
+Rate Limiting は `http_ratelimit` Phase に設定します。Free プランでは 1 Zone あたり 1 ルール、計測区間は 10 秒です。`characteristics` は `cf.colo.id` と `ip.src` の組み合わせに固定します。この組み合わせは IP アドレスと Cloudflare データセンター単位でリクエストを数えるため、世界全体の固定上限ではありません。
 
-`http_ratelimit` Phase を使いますが、Free では Zone ごとに 1 ルール、`period` は 10 秒です。`characteristics` に `cf.colo.id` を含める必要があります。
+全 HTTP 通信を対象にする基本形です。`expression = "true"` は、その Phase に到達するすべてのリクエストに適用されます。`action = "block"` は Cloudflare 標準の 429 応答を返します。Free プランでは `ratelimit.response` によるカスタム 429 本文を設定できないため、モジュールは指定を拒否します。
+
+```hcl
+rulesets = {
+  global_rate_limit = {
+    name        = "Global HTTP Rate Limit"
+    description = "IP-based limit for all HTTP traffic"
+    kind        = "zone"
+    phase       = "http_ratelimit"
+    rules_json = jsonencode([{
+      ref         = "global_ip_rate_limit"
+      description = "Limit all HTTP requests per IP"
+      action      = "block"
+      expression  = "true"
+      enabled     = true
+      ratelimit = {
+        characteristics     = ["cf.colo.id", "ip.src"]
+        period              = 10
+        requests_per_period = 30
+        mitigation_timeout  = 10
+      }
+    }])
+  }
+}
+```
+
+`requests_per_period = 30` は 10 秒あたり 30 リクエスト（平均 3 req/s）の開始値です。ブラウザーの並列取得、API 呼び出し、同じ IP から複数ホストへのアクセスを合算して、正規利用が上限を超えないか確認してください。
+
+対象パスを限定する場合は `expression` を変更します。
 
 ```hcl
 rulesets = {
@@ -366,11 +398,9 @@ rulesets = {
 }
 ```
 
-ここでの 30 リクエストは設定例です。実際には API の通信量に合わせて調整します。
+`block` / `log` には `mitigation_timeout = 10`、`challenge` / `js_challenge` / `managed_challenge` の request throttling には `mitigation_timeout = 0` を使用します。Free / Pro / Business の challenge は期間指定と挙動が異なります。
 
-`block` / `log` では `mitigation_timeout = 10`、`challenge` などの request throttling では `mitigation_timeout = 0` を使います。
-
-ちなみに、これは全世界で同じ IP から 10 秒間に 30 リクエストを数える、という意味ではありません。`cf.colo.id` を含むため Cloudflare のデータセンター単位の計数になります。
+Rate Limiting は各 Cloudflare データセンターで計数されるため、世界全体のリクエストを合計した固定上限ではありません。Free プランでは 1 ルールの制限と、過負荷時の fail-open があります。詳しくは [Rate Limiting の制限](https://developers.cloudflare.com/waf/rate-limiting-rules/troubleshooting/) を参照してください。
 
 ### Bot Fight Mode を全 Zone で有効にすればいいわけではない
 
@@ -447,6 +477,18 @@ Cloudflare Free Managed Ruleset と HTTP DDoS Protection は通常自動適用�
 5. 無変更の plan を確認してから apply を再開する。
 
 `stacks/zone` はデータソースで同じ Phase の重複作成を検出しますが、**別 state の所有権までは分かりません**。移管している間は自動 apply を止めておくのが前提です。
+
+### Rate Limiting の import と Phase の重複
+
+`http_ratelimit` の Zone エントリーポイントが Cloudflare に既にある場合、`id` なしで追加すると重複作成になります。`stacks/zone` は `cloudflare_rulesets` データソースで既存 Phase を検出し、`id` がない `rulesets` エントリを plan 時に拒否します。
+
+1. 対象 Zone の `http_ratelimit` Phase エントリーポイントを Cloudflare API または Dashboard で確認します。
+2. 存在する場合は、その 32 文字の Ruleset ID を `rulesets.global_rate_limit.id` に指定し、現在のルールを `rules_json` にそのまま再現します。
+3. 存在しない場合だけ `id` を省略して新規作成します。
+4. 既存ルールを import した直後の plan が無変更であることを確認します。差分が出る場合は、`rules_json` が現在のルールと一致していません。
+5. 同じ Zone の `http_ratelimit` を別の stack や state で同時に管理しないでください。`stacks/f2b` が所有するのは `http_request_firewall_custom` であり、`http_ratelimit` とは別 Phase です。
+
+Provider の Ruleset import ID は `zones/<zone_id>/<ruleset_id>` です。`id` を指定した場合だけ `imports.tf` が import を適用します。
 
 ### Free で使えない機能
 

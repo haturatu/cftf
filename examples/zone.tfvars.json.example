@@ -8,7 +8,15 @@
   },
   "dns_records": {},
   "settings": {},
-  "rulesets": {},
+  "rulesets": {
+    "global_rate_limit": {
+      "name": "Global HTTP Rate Limit",
+      "description": "IP-based limit for all HTTP traffic",
+      "kind": "zone",
+      "phase": "http_ratelimit",
+      "rules_json": "[{\"ref\":\"global_ip_rate_limit\",\"description\":\"Limit all HTTP requests per IP\",\"expression\":\"true\",\"action\":\"block\",\"enabled\":true,\"ratelimit\":{\"characteristics\":[\"cf.colo.id\",\"ip.src\"],\"period\":10,\"requests_per_period\":30,\"mitigation_timeout\":10}}]"
+    }
+  },
   "managed_entrypoints": {},
   "web_baseline": {
     "dnssec": false,
