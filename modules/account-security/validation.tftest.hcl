@@ -29,6 +29,18 @@ run "accept_valid_ip_list_and_turnstile" {
   }
 }
 
+run "accept_existing_ip_list_import_without_items" {
+  command = plan
+  variables {
+    ip_lists = {
+      existing = {
+        import_id = "22222222222222222222222222222222"
+        name      = "existing_ips"
+      }
+    }
+  }
+}
+
 run "reject_more_than_one_ip_list" {
   command = plan
   variables {

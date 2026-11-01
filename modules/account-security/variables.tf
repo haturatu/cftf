@@ -9,7 +9,7 @@ variable "account_id" {
 }
 
 variable "ip_lists" {
-  description = "Account-level IP lists used by WAF expressions. The Free plan allows one IP list."
+  description = "Account-level IP lists used by WAF expressions. The Free plan allows one IP list. Omit items when importing an existing list so its entries are preserved; an explicit empty list clears it."
   type = map(object({
     import_id   = optional(string)
     name        = string
@@ -17,7 +17,7 @@ variable "ip_lists" {
     items = optional(list(object({
       ip      = string
       comment = optional(string)
-    })), [])
+    })))
   }))
   default  = {}
   nullable = false
@@ -26,7 +26,7 @@ variable "ip_lists" {
       for list in values(var.ip_lists) :
       can(regex("^[a-zA-Z0-9_]+$", list.name)) &&
       (list.import_id == null || can(regex("^[0-9a-fA-F]{32}$", list.import_id))) &&
-      alltrue([for item in list.items : can(regex("^[0-9a-fA-F:.]+(/[0-9]{1,3})?$", item.ip))])
+      alltrue([for item in coalesce(list.items, []) : can(regex("^[0-9a-fA-F:.]+(/[0-9]{1,3})?$", item.ip))])
     ])
     error_message = "The Free plan allows one IP list with a valid name, optional 32-character id, and IP/CIDR items."
   }
@@ -39,10 +39,7 @@ variable "turnstile_widgets" {
     name            = string
     domains         = list(string)
     mode            = string
-    bot_fight_mode  = optional(bool)
     clearance_level = optional(string)
-    ephemeral_id    = optional(bool)
-    offlabel        = optional(bool)
     region          = optional(string, "world")
   }))
   default  = {}

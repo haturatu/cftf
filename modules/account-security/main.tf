@@ -5,7 +5,7 @@ resource "cloudflare_list" "managed" {
   kind        = "ip"
   name        = each.value.name
   description = each.value.description
-  items = [
+  items = each.value.items == null ? null : [
     for item in each.value.items : {
       ip      = item.ip
       comment = item.comment
@@ -20,9 +20,6 @@ resource "cloudflare_turnstile_widget" "managed" {
   name            = each.value.name
   domains         = each.value.domains
   mode            = each.value.mode
-  bot_fight_mode  = try(each.value.bot_fight_mode, null)
   clearance_level = try(each.value.clearance_level, null)
-  ephemeral_id    = try(each.value.ephemeral_id, null)
-  offlabel        = try(each.value.offlabel, null)
   region          = each.value.region
 }
