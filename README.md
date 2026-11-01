@@ -121,7 +121,7 @@ DNSSEC は Cloudflare 側の有効化だけでは信頼チェーンが完成し�
 | `tls_1_3` | `on` |
 | `browser_check` | `on` |
 
-`url_normalization = true` は、Cloudflare アカウント / Zone で URL Normalization が表示・利用でき、API トークンが必要な権限を持つ場合だけ有効にします。現在の環境では URL Normalization API が `403` になるため、既定値は `false` です。
+`url_normalization = true` は、Cloudflare アカウント / Zone で URL Normalization が表示・利用でき、API トークンが必要な権限を持つ場合だけ有効にします。URL Normalization API には「URL Normalization」という専用の権限グループはなく、Zone スコープの **`Sanitize Read`**（plan）と **`Sanitize Write`**（apply）で許可されます。`Zone Transform Rules` や `Zone WAF` では 403 になります。現在の環境のトークンは `Sanitize` を持たないため、既定値は `false` です。
 
 `dnssec = true` も指定できますが、Cloudflare 側の有効化後にレジストラへ DS レコードを登録し、`dig +dnssec` で確認してください。
 
