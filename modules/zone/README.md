@@ -87,11 +87,12 @@ DNSSEC は `status = "active"` で有効にできますが、Cloudflare 側だ�
 
 | 種類 | 制限 |
 | --- | --- |
-| Custom WAF | 5 ルール / Zone |
-| Rate Limiting | 1 ルール / Zone、`period = 10` |
-| Rate Limiting の `characteristics` | `cf.colo.id` が必要 |
-| `block` / `log` | `mitigation_timeout = 10` |
-| チャレンジ系 | `mitigation_timeout = 0` |
+| `http_request_firewall_custom` | 5 ルール / Zone |
+| `http_ratelimit` | 1 ルール / Zone。`period = 10` 秒 |
+| `http_ratelimit` の `characteristics` | `cf.colo.id` と `ip.src` の組み合わせ |
+| Rate Limit の `block` / `log` | `mitigation_timeout = 10` |
+| Rate Limit のチャレンジ系 | `mitigation_timeout = 0`（request throttling） |
+| Rate Limit のカスタム 429 応答 | `ratelimit.response` は Free プランでは指定不可 |
 
 Cloudflare 側に既存のルールがあっても上限に含まれます。Terraform 側に 1 件しか書いていないから安全、というわけではありません。
 

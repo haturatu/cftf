@@ -122,9 +122,10 @@ variable "rulesets" {
           for rule in try(jsondecode(ruleset.rules_json), []) :
           contains(["block", "challenge", "js_challenge", "managed_challenge", "log"], try(rule.action, "")) &&
           try(rule.ratelimit.period, 0) == 10 &&
-          contains(try(rule.ratelimit.characteristics, []), "cf.colo.id") &&
+          try(toset(rule.ratelimit.characteristics), toset([])) == toset(["cf.colo.id", "ip.src"]) &&
           try(rule.ratelimit.requests_per_period, 0) > 0 &&
           try(rule.ratelimit.score_per_period, null) == null &&
+          try(rule.ratelimit.response, null) == null &&
           (
             (contains(["challenge", "js_challenge", "managed_challenge"], try(rule.action, "")) && try(rule.ratelimit.mitigation_timeout, null) == 0) ||
             (!contains(["challenge", "js_challenge", "managed_challenge"], try(rule.action, "")) && try(rule.ratelimit.mitigation_timeout, 10) == 10)
@@ -132,7 +133,7 @@ variable "rulesets" {
         ])
       )
     ])
-    error_message = "The Free plan allows one rate limiting rule per zone with period 10, cf.colo.id in characteristics, and requests_per_period. Challenge actions require mitigation_timeout 0; other actions require 10."
+    error_message = "The Free plan allows one rate limiting rule per zone with period 10, exactly cf.colo.id and ip.src characteristics, and requests_per_period. Custom responses are not available on the Free plan. Challenge actions require mitigation_timeout 0; other actions require 10."
   }
 }
 

@@ -188,6 +188,42 @@ run "accept_free_plan_rate_limit" {
   }
 }
 
+run "accept_free_plan_global_rate_limit" {
+  command = plan
+  variables {
+    rulesets = {
+      global_rate_limit = {
+        name        = "Global HTTP Rate Limit"
+        description = "IP-based limit for all HTTP traffic"
+        kind        = "zone"
+        phase       = "http_ratelimit"
+        rules_json = jsonencode([{
+          ref         = "global_ip_rate_limit"
+          description = "Limit all HTTP requests per IP"
+          action      = "block"
+          expression  = "true"
+          enabled     = true
+          ratelimit = {
+            characteristics     = ["cf.colo.id", "ip.src"]
+            period              = 10
+            requests_per_period = 30
+            mitigation_timeout  = 10
+          }
+        }])
+      }
+    }
+  }
+  assert {
+    condition = (
+      cloudflare_ruleset.managed["global_rate_limit"].phase == "http_ratelimit" &&
+      length(cloudflare_ruleset.managed["global_rate_limit"].rules) == 1 &&
+      cloudflare_ruleset.managed["global_rate_limit"].rules[0].expression == "true" &&
+      cloudflare_ruleset.managed["global_rate_limit"].rules[0].action == "block"
+    )
+    error_message = "The global rate limit must apply to every HTTP request and block excess requests."
+  }
+}
+
 run "accept_free_plan_challenge_rate_limit" {
   command = plan
   variables {
@@ -227,6 +263,83 @@ run "reject_rate_limit_without_cf_colo_id" {
             period              = 10
             requests_per_period = 30
             mitigation_timeout  = 10
+          }
+        }])
+      }
+    }
+  }
+  expect_failures = [var.rulesets]
+}
+
+run "reject_rate_limit_without_ip_src" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "block"
+          expression = "true"
+          ratelimit = {
+            characteristics     = ["cf.colo.id"]
+            period              = 10
+            requests_per_period = 30
+            mitigation_timeout  = 10
+          }
+        }])
+      }
+    }
+  }
+  expect_failures = [var.rulesets]
+}
+
+run "reject_rate_limit_with_extra_characteristic" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "block"
+          expression = "true"
+          ratelimit = {
+            characteristics     = ["cf.colo.id", "ip.src", "http.request.method"]
+            period              = 10
+            requests_per_period = 30
+            mitigation_timeout  = 10
+          }
+        }])
+      }
+    }
+  }
+  expect_failures = [var.rulesets]
+}
+
+run "reject_free_plan_rate_limit_custom_response" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "block"
+          expression = "true"
+          ratelimit = {
+            characteristics     = ["cf.colo.id", "ip.src"]
+            period              = 10
+            requests_per_period = 30
+            mitigation_timeout  = 10
+            response = {
+              status_code  = 429
+              content_type = "application/json"
+              content      = "{\"error\":\"rate limited\"}"
+            }
           }
         }])
       }
