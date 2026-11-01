@@ -120,21 +120,26 @@ variable "rulesets" {
         length(try(jsondecode(ruleset.rules_json), [])) <= 1 &&
         alltrue([
           for rule in try(jsondecode(ruleset.rules_json), []) :
-          try(rule.ratelimit.period, 10) == 10 &&
-          try(rule.ratelimit.mitigation_timeout, 10) == 10 &&
-          try(rule.ratelimit.requests_per_period, null) != null &&
-          try(rule.ratelimit.score_per_period, null) == null
+          contains(["block", "challenge", "js_challenge", "managed_challenge", "log"], try(rule.action, "")) &&
+          try(rule.ratelimit.period, 0) == 10 &&
+          contains(try(rule.ratelimit.characteristics, []), "cf.colo.id") &&
+          try(rule.ratelimit.requests_per_period, 0) > 0 &&
+          try(rule.ratelimit.score_per_period, null) == null &&
+          (
+            (contains(["challenge", "js_challenge", "managed_challenge"], try(rule.action, "")) && try(rule.ratelimit.mitigation_timeout, null) == 0) ||
+            (!contains(["challenge", "js_challenge", "managed_challenge"], try(rule.action, "")) && try(rule.ratelimit.mitigation_timeout, 10) == 10)
+          )
         ])
       )
     ])
-    error_message = "The Free plan allows one rate limiting rule per zone; period and mitigation_timeout must be 10 seconds."
+    error_message = "The Free plan allows one rate limiting rule per zone with period 10, cf.colo.id in characteristics, and requests_per_period. Challenge actions require mitigation_timeout 0; other actions require 10."
   }
 }
 
-variable "managed_rulesets" {
-  description = "Overrides for Cloudflare-managed rulesets such as the Free Managed Ruleset and L7 DDoS ruleset. Import the existing managed ruleset id; Terraform never creates these rulesets."
+variable "managed_entrypoints" {
+  description = "Zone entrypoint rulesets that deploy or override Cloudflare-managed rulesets. id is the zone entrypoint ruleset id, not the managed ruleset id. Omit id to create a new entrypoint."
   type = map(object({
-    id          = string
+    id          = optional(string)
     name        = string
     description = optional(string)
     phase       = string
@@ -144,26 +149,30 @@ variable "managed_rulesets" {
   nullable = false
   validation {
     condition = alltrue([
-      for ruleset in values(var.managed_rulesets) :
-      can(regex("^[0-9a-fA-F]{32}$", ruleset.id)) &&
-      contains(["http_request_firewall_managed", "http_response_firewall_managed", "ddos_l7"], ruleset.phase)
+      for ruleset in values(var.managed_entrypoints) :
+      contains(["http_request_firewall_managed", "ddos_l7"], ruleset.phase) &&
+      (ruleset.id == null || can(regex("^[0-9a-fA-F]{32}$", ruleset.id)))
     ])
-    error_message = "Managed ruleset overrides require an existing 32-character id and a supported managed phase."
+    error_message = "Managed entrypoints require a supported managed phase and an optional 32-character entrypoint ruleset id."
   }
   validation {
-    condition     = alltrue([for ruleset in values(var.managed_rulesets) : can(jsondecode(ruleset.rules_json)) && startswith(trimspace(ruleset.rules_json), "[")])
-    error_message = "managed_rulesets.rules_json must encode a list of rules."
+    condition     = alltrue([for ruleset in values(var.managed_entrypoints) : can(jsondecode(ruleset.rules_json)) && startswith(trimspace(ruleset.rules_json), "[")])
+    error_message = "managed_entrypoints.rules_json must encode a list of rules."
   }
   validation {
-    condition     = length(distinct([for ruleset in values(var.managed_rulesets) : ruleset.phase])) == length(var.managed_rulesets)
+    condition     = alltrue([for ruleset in values(var.managed_entrypoints) : length(try(jsondecode(ruleset.rules_json), [])) > 0])
+    error_message = "managed_entrypoints.rules_json must contain at least one execute rule; an empty list would remove the managed ruleset deployment."
+  }
+  validation {
+    condition     = length(distinct([for ruleset in values(var.managed_entrypoints) : ruleset.phase])) == length(var.managed_entrypoints)
     error_message = "Each managed ruleset phase can have only one entrypoint ruleset per zone."
   }
   validation {
     condition = length(setintersection(
       toset([for ruleset in values(var.rulesets) : ruleset.phase]),
-      toset([for ruleset in values(var.managed_rulesets) : ruleset.phase]),
+      toset([for ruleset in values(var.managed_entrypoints) : ruleset.phase]),
     )) == 0
-    error_message = "A phase cannot be owned by both rulesets and managed_rulesets."
+    error_message = "A phase cannot be owned by both rulesets and managed_entrypoints."
   }
 }
 
@@ -175,18 +184,10 @@ variable "bot_management" {
     ai_training                 = optional(string)
     ai_user                     = optional(string)
     aisearch                    = optional(string)
-    content_bots_protection     = optional(string)
     crawler_protection          = optional(string)
     cf_robots_variant           = optional(string)
     is_robots_txt_managed       = optional(bool)
-    enable_js                   = optional(bool)
-    auto_update_model           = optional(bool)
-    bm_cookie_enabled           = optional(bool)
     bot_preference_sync_enabled = optional(bool)
-    jsd_api_results_enabled     = optional(bool)
-    suppress_session_score      = optional(bool)
-    optimize_wordpress          = optional(bool)
-    ai_bots_migration_opt_out   = optional(bool)
   })
   default = null
   validation {
@@ -195,11 +196,10 @@ variable "bot_management" {
       (var.bot_management.ai_training == null || contains(["disabled", "disallow", "block", "only_on_ad_pages"], var.bot_management.ai_training)) &&
       (var.bot_management.ai_user == null || contains(["disabled", "block", "only_on_ad_pages"], var.bot_management.ai_user)) &&
       (var.bot_management.aisearch == null || contains(["disabled", "block", "only_on_ad_pages"], var.bot_management.aisearch)) &&
-      (var.bot_management.content_bots_protection == null || contains(["block", "disabled"], var.bot_management.content_bots_protection)) &&
       (var.bot_management.crawler_protection == null || contains(["enabled", "disabled"], var.bot_management.crawler_protection)) &&
       (var.bot_management.cf_robots_variant == null || contains(["off", "policy_only"], var.bot_management.cf_robots_variant))
     )
-    error_message = "bot_management contains an unsupported value for the selected bot control."
+    error_message = "bot_management contains an unsupported value for the selected Free plan bot control."
   }
   validation {
     condition = var.bot_management == null || anytrue([

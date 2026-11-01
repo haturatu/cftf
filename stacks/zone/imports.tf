@@ -15,12 +15,12 @@ import {
 import {
   for_each = { for name, ruleset in var.rulesets : name => ruleset if ruleset.id != null }
   to       = module.zone.cloudflare_ruleset.managed[each.key]
-  id       = "${var.zone.id}/${each.value.id}"
+  id       = "zones/${var.zone.id}/${each.value.id}"
 }
 import {
-  for_each = var.managed_rulesets
-  to       = module.zone.cloudflare_ruleset.managed_override[each.key]
-  id       = "${var.zone.id}/${each.value.id}"
+  for_each = { for name, ruleset in var.managed_entrypoints : name => ruleset if ruleset.id != null }
+  to       = module.zone.cloudflare_ruleset.managed_entrypoint[each.key]
+  id       = "zones/${var.zone.id}/${each.value.id}"
 }
 import {
   for_each = var.bot_management == null ? {} : { managed = true }

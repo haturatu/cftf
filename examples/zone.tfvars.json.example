@@ -9,12 +9,13 @@
   "dns_records": {},
   "settings": {},
   "rulesets": {},
-  "managed_rulesets": {},
+  "managed_entrypoints": {},
   "bot_management": {
     "fight_mode": true,
     "ai_bots_protection": "block",
     "crawler_protection": "enabled",
-    "is_robots_txt_managed": true
+    "is_robots_txt_managed": true,
+    "bot_preference_sync_enabled": true
   },
   "url_normalization": {
     "scope": "incoming",

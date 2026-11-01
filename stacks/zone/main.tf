@@ -6,7 +6,12 @@ module "zone" {
   settings    = var.settings
   rulesets    = var.rulesets
 
-  managed_rulesets           = var.managed_rulesets
+  managed_entrypoints = var.managed_entrypoints
+  existing_zone_ruleset_phases = toset([
+    for ruleset in try(data.cloudflare_rulesets.existing[0].rulesets, toset([])) : ruleset.phase
+    if ruleset.kind == "zone"
+  ])
+
   bot_management             = var.bot_management
   url_normalization          = var.url_normalization
   dnssec                     = var.dnssec

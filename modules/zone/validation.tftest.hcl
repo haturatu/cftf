@@ -177,6 +177,52 @@ run "accept_free_plan_rate_limit" {
           action     = "block"
           expression = "starts_with(http.request.uri.path, \"/api/\")"
           ratelimit = {
+            characteristics     = ["cf.colo.id", "ip.src"]
+            period              = 10
+            requests_per_period = 30
+            mitigation_timeout  = 10
+          }
+        }])
+      }
+    }
+  }
+}
+
+run "accept_free_plan_challenge_rate_limit" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "managed_challenge"
+          expression = "starts_with(http.request.uri.path, \"/login/\")"
+          ratelimit = {
+            characteristics     = ["cf.colo.id", "ip.src"]
+            period              = 10
+            requests_per_period = 20
+            mitigation_timeout  = 0
+          }
+        }])
+      }
+    }
+  }
+}
+
+run "reject_rate_limit_without_cf_colo_id" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "block"
+          expression = "starts_with(http.request.uri.path, \"/api/\")"
+          ratelimit = {
             characteristics     = ["ip.src"]
             period              = 10
             requests_per_period = 30
@@ -186,6 +232,31 @@ run "accept_free_plan_rate_limit" {
       }
     }
   }
+  expect_failures = [var.rulesets]
+}
+
+run "reject_challenge_rate_limit_with_duration" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "managed_challenge"
+          expression = "starts_with(http.request.uri.path, \"/login/\")"
+          ratelimit = {
+            characteristics     = ["cf.colo.id", "ip.src"]
+            period              = 10
+            requests_per_period = 20
+            mitigation_timeout  = 10
+          }
+        }])
+      }
+    }
+  }
+  expect_failures = [var.rulesets]
 }
 
 run "reject_free_plan_rate_limit_period" {
@@ -200,7 +271,7 @@ run "reject_free_plan_rate_limit_period" {
           action     = "block"
           expression = "starts_with(http.request.uri.path, \"/api/\")"
           ratelimit = {
-            characteristics     = ["ip.src"]
+            characteristics     = ["cf.colo.id", "ip.src"]
             period              = 60
             requests_per_period = 100
             mitigation_timeout  = 60
@@ -246,7 +317,44 @@ run "reject_invalid_url_normalization_scope" {
   expect_failures = [var.url_normalization]
 }
 
-run "reject_phase_owned_by_zone_and_managed_rulesets" {
+run "accept_managed_entrypoint" {
+  command = plan
+  variables {
+    managed_entrypoints = {
+      free_managed = {
+        name  = "Free Managed WAF entrypoint"
+        phase = "http_request_firewall_managed"
+        rules_json = jsonencode([{
+          action     = "execute"
+          expression = "true"
+          action_parameters = {
+            id = "22222222222222222222222222222222"
+          }
+        }])
+      }
+    }
+  }
+  assert {
+    condition     = cloudflare_ruleset.managed_entrypoint["free_managed"].kind == "zone"
+    error_message = "Managed ruleset deployments must use the zone phase entrypoint (kind = \"zone\"), not the managed ruleset itself."
+  }
+}
+
+run "reject_empty_managed_entrypoint_rules" {
+  command = plan
+  variables {
+    managed_entrypoints = {
+      free_managed = {
+        name       = "Free Managed WAF entrypoint"
+        phase      = "http_request_firewall_managed"
+        rules_json = jsonencode([])
+      }
+    }
+  }
+  expect_failures = [var.managed_entrypoints]
+}
+
+run "reject_phase_owned_by_zone_and_managed_entrypoints" {
   command = plan
   variables {
     rulesets = {
@@ -257,14 +365,29 @@ run "reject_phase_owned_by_zone_and_managed_rulesets" {
         rules_json = jsonencode([])
       }
     }
-    managed_rulesets = {
+    managed_entrypoints = {
       managed_entry = {
-        id         = "22222222222222222222222222222222"
         name       = "managed entry"
         phase      = "http_request_firewall_managed"
         rules_json = jsonencode([])
       }
     }
   }
-  expect_failures = [var.managed_rulesets]
+  expect_failures = [var.managed_entrypoints]
+}
+
+run "reject_duplicate_existing_zone_entrypoint_without_import" {
+  command = plan
+  variables {
+    existing_zone_ruleset_phases = ["http_request_firewall_custom"]
+    rulesets = {
+      custom = {
+        name       = "custom"
+        kind       = "zone"
+        phase      = "http_request_firewall_custom"
+        rules_json = jsonencode([])
+      }
+    }
+  }
+  expect_failures = [cloudflare_ruleset.managed["custom"]]
 }
