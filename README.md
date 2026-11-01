@@ -187,7 +187,7 @@ R2 に S3 のバージョニング機能はないため、state、bootstrap の�
 
 ## Fail2ban API
 
-`stacks/f2b` は D1、Access の組織・Service Token・収集ポリシー、カスタムドメイン、WAF を管理します。新規の `f2b` ターゲットは専用 state を使用します。Worker のスクリプト、バインディング、バージョンは公開 `f2b-api` リポジトリの GitHub Actions が Wrangler で配信し、このスタックはスクリプトを管理しません。アプリケーションのビルド結果は非公開 R2 の設定リビジョンに含めません。
+`stacks/f2b` は D1、Access の組織・Service Token・収集ポリシー、カスタムドメイン、WAF を管理します。新規の `f2b` ターゲットは専用 state を使用します。Worker のスクリプト、バインディング、バージョンは公開 `f2b-api` リポジトリの GitHub Actions が Wrangler で配信し、このスタックはスクリプトを管理しません。アプリケーションのビルド結果は非公開 R2 の設定リビジョンに含めません。`terraform output -json deployment_config` を非公開で取得し、`f2b-api` の `production` 環境の Secret `F2B_DEPLOY_CONFIG` に設定します。
 
 両 Worker の `workers.dev` とプレビュー URL は Wrangler 設定で無効にし、収集ドメインを Service Auth で保護します。収集元ごとに Service Token を発行し、API は Cloudflare が検証した Access アプリケーション AUD と設定上の Jail 範囲を照合します。認証用の Secret は Terraform state と各収集サーバーの保護された設定だけに保存します。D1 のスキーマ変更は `f2b-api/migrations` を適用します。
 
