@@ -32,7 +32,8 @@ cftf/
 ├── stacks/
 │   ├── zone/                 # 全 Zone が共有する root
 │   ├── r2/
-│   └── workers/
+│   ├── workers/
+│   └── f2b/                   # 公開 API・Access 保護の収集 Worker・D1
 ├── modules/zone/             # 既存リソースアドレスを維持する共通定義
 ├── bootstrap/backend/        # State・Config バケットの初期構築と復旧専用
 ├── scripts/tf.sh             # 共通の手動実行窓口
@@ -183,3 +184,9 @@ R2 に S3 のバージョニング機能はないため、state、bootstrap の�
 - [Cloudflare R2 backend](https://developers.cloudflare.com/terraform/advanced-topics/remote-backend/)
 - [Terraform S3 backend](https://developer.hashicorp.com/terraform/language/backend/s3)
 - [GitHub Actions の実行イベント](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)
+
+## Fail2ban API
+
+`stacks/f2b` は公開 API と収集 Worker、D1、Access の組織・Service Token・収集ポリシーを管理します。新規の `f2b` ターゲットは専用 state を使用し、既存 Worker と Zone の state を共有しません。アプリケーションのソースは公開 `f2b-api` リポジトリで管理し、ビルド結果とデプロイ設定を非公開 R2 の新しいリビジョンへ格納します。
+
+両 Worker の `workers.dev` とプレビュー URL を無効にし、収集ドメインを Service Auth で保護します。収集元ごとに Service Token を発行し、API は Cloudflare が検証したサービス ID と設定上の Jail 範囲を照合します。認証用の Secret は Terraform state と各収集サーバーの保護された設定だけに保存します。D1 のスキーマ変更は `f2b-api/migrations` を適用します。

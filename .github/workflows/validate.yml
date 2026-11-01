@@ -29,10 +29,11 @@ jobs:
           terraform fmt -check -recursive
           .github/scripts/control.test.sh
           ./scripts/tf.test.sh
-          for root in stacks/zone stacks/r2 stacks/workers bootstrap/backend; do
+          for root in stacks/zone stacks/r2 stacks/workers stacks/f2b bootstrap/backend; do
             terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly
             terraform -chdir="$root" validate
           done
           terraform -chdir=modules/zone init -backend=false -input=false
           terraform -chdir=modules/zone test
           terraform -chdir=bootstrap/backend test
+          terraform -chdir=stacks/f2b test
