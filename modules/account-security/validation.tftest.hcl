@@ -62,6 +62,58 @@ run "reject_invalid_ip_list_name" {
   expect_failures = [var.ip_lists]
 }
 
+run "reject_uppercase_ip_list_name" {
+  command = plan
+  variables {
+    ip_lists = {
+      invalid = { name = "Uppercase" }
+    }
+  }
+  expect_failures = [var.ip_lists]
+}
+
+run "reject_too_long_ip_list_name" {
+  command = plan
+  variables {
+    ip_lists = {
+      invalid = { name = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    }
+  }
+  expect_failures = [var.ip_lists]
+}
+
+run "reject_invalid_ip_address" {
+  command = plan
+  variables {
+    ip_lists = {
+      invalid = {
+        name  = "invalid_ips"
+        items = [{ ip = "999.999.999.999" }]
+      }
+    }
+  }
+  expect_failures = [var.ip_lists]
+}
+
+run "reject_more_than_ten_thousand_ip_list_items" {
+  command = plan
+  variables {
+    ip_lists = {
+      too_large = {
+        name = "too_large"
+        items = flatten([
+          for third in range(101) : [
+            for fourth in range(100) : {
+              ip = "10.${third}.${fourth}.1"
+            }
+          ]
+        ])
+      }
+    }
+  }
+  expect_failures = [var.ip_lists]
+}
+
 run "reject_invalid_turnstile_mode" {
   command = plan
   variables {

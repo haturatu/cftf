@@ -24,11 +24,18 @@ variable "ip_lists" {
   validation {
     condition = length(var.ip_lists) <= 1 && alltrue([
       for list in values(var.ip_lists) :
-      can(regex("^[a-zA-Z0-9_]+$", list.name)) &&
+      can(regex("^[a-z0-9_]{1,50}$", list.name)) &&
       (list.import_id == null || can(regex("^[0-9a-fA-F]{32}$", list.import_id))) &&
-      alltrue([for item in coalesce(list.items, []) : can(regex("^[0-9a-fA-F:.]+(/[0-9]{1,3})?$", item.ip))])
+      length(coalesce(list.items, [])) <= 10000 &&
+      alltrue([
+        for item in coalesce(list.items, []) :
+        can(cidrhost(item.ip, 0)) || can(cidrhost(
+          can(regex(":", item.ip)) ? "${item.ip}/128" : "${item.ip}/32",
+          0
+        ))
+      ])
     ])
-    error_message = "The Free plan allows one IP list with a valid name, optional 32-character id, and IP/CIDR items."
+    error_message = "The Free plan allows one IP list with a lowercase name of 1-50 characters, at most 10,000 valid IP/CIDR items, and an optional 32-character id."
   }
 }
 

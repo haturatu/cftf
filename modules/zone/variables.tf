@@ -94,9 +94,11 @@ variable "rulesets" {
   validation {
     condition = alltrue([
       for ruleset in values(var.rulesets) :
-      ruleset.kind == "zone" && (ruleset.id == null || can(regex("^[0-9a-fA-F]{32}$", ruleset.id)))
+      ruleset.kind == "zone" &&
+      !contains(["ddos_l7", "http_request_firewall_managed", "http_response_firewall_managed"], ruleset.phase) &&
+      (ruleset.id == null || can(regex("^[0-9a-fA-F]{32}$", ruleset.id)))
     ])
-    error_message = "Rulesets must be user-owned zone rulesets; an existing id, when supplied, must be a 32-character hexadecimal identifier."
+    error_message = "Rulesets must be user-owned zone rulesets; managed phases belong to managed_entrypoints. An existing id must be a 32-character hexadecimal identifier."
   }
   validation {
     condition     = alltrue([for ruleset in values(var.rulesets) : can(jsondecode(ruleset.rules_json)) && startswith(trimspace(ruleset.rules_json), "[")])
@@ -162,6 +164,31 @@ variable "managed_entrypoints" {
   validation {
     condition     = alltrue([for ruleset in values(var.managed_entrypoints) : length(try(jsondecode(ruleset.rules_json), [])) > 0])
     error_message = "managed_entrypoints.rules_json must contain at least one execute rule; an empty list would remove the managed ruleset deployment."
+  }
+  validation {
+    condition = alltrue([
+      for ruleset in values(var.managed_entrypoints) :
+      length([
+        for rule in try(jsondecode(ruleset.rules_json), []) :
+        rule
+        if try(rule.action, "") == "execute" &&
+        try(rule.enabled, true) != false &&
+        length(trimspace(try(rule.expression, ""))) > 0 &&
+        can(regex("^[0-9a-fA-F]{32}$", try(rule.action_parameters.id, "")))
+      ]) > 0
+    ])
+    error_message = "managed_entrypoints must contain at least one enabled execute rule with an expression and a 32-character action_parameters.id."
+  }
+  validation {
+    condition = alltrue([
+      for ruleset in values(var.managed_entrypoints) :
+      length([
+        for rule in try(jsondecode(ruleset.rules_json), []) :
+        rule
+        if try(rule.action, "") == "skip" && trimspace(try(rule.expression, "")) == "true"
+      ]) == 0
+    ])
+    error_message = "An unconditional skip rule would disable the managed ruleset deployment; scope the skip expression to the intended exceptions."
   }
   validation {
     condition     = length(distinct([for ruleset in values(var.managed_entrypoints) : ruleset.phase])) == length(var.managed_entrypoints)

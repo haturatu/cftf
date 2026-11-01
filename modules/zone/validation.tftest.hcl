@@ -354,22 +354,78 @@ run "reject_empty_managed_entrypoint_rules" {
   expect_failures = [var.managed_entrypoints]
 }
 
-run "reject_phase_owned_by_zone_and_managed_entrypoints" {
+run "reject_managed_phase_in_rulesets" {
   command = plan
   variables {
     rulesets = {
-      zone_entry = {
-        name       = "zone entry"
+      managed = {
+        name       = "managed WAF"
         kind       = "zone"
         phase      = "http_request_firewall_managed"
         rules_json = jsonencode([])
       }
     }
+  }
+  expect_failures = [var.rulesets]
+}
+
+run "reject_managed_entrypoint_without_execute" {
+  command = plan
+  variables {
     managed_entrypoints = {
-      managed_entry = {
-        name       = "managed entry"
+      managed = {
+        name  = "managed WAF"
+        phase = "http_request_firewall_managed"
+        rules_json = jsonencode([{
+          action     = "skip"
+          expression = "http.request.uri.path eq \"/health\""
+          action_parameters = {
+            phases = ["http_request_firewall_managed"]
+          }
+        }])
+      }
+    }
+  }
+  expect_failures = [var.managed_entrypoints]
+}
+
+run "reject_managed_entrypoint_execute_without_id" {
+  command = plan
+  variables {
+    managed_entrypoints = {
+      managed = {
+        name       = "managed WAF"
         phase      = "http_request_firewall_managed"
-        rules_json = jsonencode([])
+        rules_json = jsonencode([{ action = "execute", expression = "true" }])
+      }
+    }
+  }
+  expect_failures = [var.managed_entrypoints]
+}
+
+run "reject_managed_entrypoint_unconditional_skip" {
+  command = plan
+  variables {
+    managed_entrypoints = {
+      managed = {
+        name  = "managed WAF"
+        phase = "http_request_firewall_managed"
+        rules_json = jsonencode([
+          {
+            action     = "skip"
+            expression = "true"
+            action_parameters = {
+              phases = ["http_request_firewall_managed"]
+            }
+          },
+          {
+            action     = "execute"
+            expression = "true"
+            action_parameters = {
+              id = "77454fe2d30c4220b5701f6fdfb893ba"
+            }
+          },
+        ])
       }
     }
   }
