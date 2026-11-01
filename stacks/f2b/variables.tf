@@ -39,6 +39,6 @@ variable "sources" {
   }
 }
 variable "access_organization" {
-  type    = object({ name = string, auth_domain = optional(string) })
+  type    = object({ name = string, auth_domain = string })
   default = null
 }
