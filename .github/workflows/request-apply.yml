@@ -23,7 +23,11 @@ concurrency:
 
 jobs:
   control:
-    if: vars.AUTOMATION_ENABLED == 'true'
+    # Merging the activation PR enables automation by default.
+    # Emergency stop: set the AUTOMATION_DISABLED repository variable to "true".
+    if: >-
+      vars.AUTOMATION_DISABLED != 'true' &&
+      github.repository == 'haturatu/cftf'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
