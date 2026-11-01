@@ -16,8 +16,10 @@ updates:
   - package-ecosystem: terraform
     directories:
       - /bootstrap/backend
+      - /modules/account-security
       - /modules/zone
       - /stacks/r2
+      - /stacks/security-account
       - /stacks/workers
       - /stacks/zone
     schedule:
