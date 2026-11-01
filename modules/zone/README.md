@@ -101,7 +101,7 @@ HCL の例と、実際に採用する場合の注意点は [トップレベル R
 
 ### Managed Ruleset の実行設定
 
-`http_request_firewall_managed` / `http_response_firewall_managed` / `ddos_l7` を、通常の `rulesets` で所有しようとすると拒否します。管理ルールセットの実行を上書きする場合は `managed_entrypoints` を使用します。
+`http_request_firewall_managed` / `http_response_firewall_managed` / `ddos_l7` は、通常の `rulesets` では拒否します。このモジュールの `managed_entrypoints` が対応するのは **`http_request_firewall_managed` と `ddos_l7`** の Zone エントリーポイントです。`http_response_firewall_managed` をここで管理することはできません。
 
 `managed_entrypoints.id` は **管理ルールセット本体の ID ではなく、Zone Phase エントリーポイントの ID** です。`rules_json` には少なくとも一つの有効な `execute` ルール（`expression` と32桁の `action_parameters.id` を持つ）を含めます。
 
