@@ -161,7 +161,16 @@ plan の通常の標準出力には、固定された状態メッセージだけ
 
 公開側へ返すのは固定の成功・失敗・後続コミットによる置き換え通知のみです。**plan の本文、ドメイン、ID、リソースの種類・件数は公開しません。** Private CI も PR ブランチのコードではなく、マージ済みコミットを対象にします。
 
-`AUTOMATION_ENABLED` と Private 側の `DEPLOY_ENABLED` は初期状態では `false` です。運用開始には GitHub App、必要な Secrets、R2 の復旧、Private の設定と承認が必要です。
+自動化は Public と Private の両方で有効化用 PR をマージすると既定で有効になります。以前の `AUTOMATION_ENABLED` と `DEPLOY_ENABLED` は参照しません。GitHub App、必要な Secrets、R2 の State / Config、固定済み Config リビジョンを確認し、**Private の `Private Terraform checks`（`verify.yml`）を現行 master で成功させてから** `terraform-apply` ラベルを使用してください。PR のマージだけで任意の Terraform 変更が apply されるわけではなく、従来どおり許可された人のラベル操作、現在の head SHA、CI 成功、レビュー状態、Private 側の検査が必要です。
+
+緊急停止は GitHub の Repository Variables で明示します（両方停止する場合）:
+
+```sh
+gh variable set AUTOMATION_DISABLED --repo haturatu/cftf --body true
+gh variable set DEPLOY_DISABLED --repo haturatu/cftf-deploy --body true
+```
+
+再開するときは、復旧と検証を済ませた後で両方を `false` にします。`AUTOMATION_DISABLED` は Public の自動マージ・デプロイ要求を停止し、`DEPLOY_DISABLED` は Private の apply ジョブを停止します。Private 側の `verify.yml` は停止スイッチとは独立して手動検証に使用できます。
 
 `terraform-apply` を付けないドキュメント PR は、通常の検証・レビュー対象です。ラベルを貼る場合は、条件が満たされると自動マージとデプロイ要求につながることに注意してください。実際のラベル処理は [request-apply.yml](.github/workflows/request-apply.yml) と [control.py](.github/scripts/control.py) を参照してください。
 
