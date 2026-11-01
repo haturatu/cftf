@@ -1,0 +1,24 @@
+{
+  "account_id": "REPLACE_WITH_ACCOUNT_ID",
+  "ip_lists": {
+    "allowed": {
+      "name": "allowed_ips",
+      "description": "Trusted addresses referenced by WAF expressions",
+      "items": [
+        {
+          "ip": "192.0.2.10",
+          "comment": "Example trusted address"
+        }
+      ]
+    }
+  },
+  "turnstile_widgets": {
+    "login": {
+      "name": "Login form",
+      "domains": [
+        "example.invalid"
+      ],
+      "mode": "managed"
+    }
+  }
+}

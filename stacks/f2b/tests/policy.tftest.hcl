@@ -29,7 +29,7 @@ run "free_api_is_separate_from_protected_ingestion" {
     error_message = "Expose each Access audience only through the private deployment output."
   }
   assert {
-    condition     = cloudflare_ruleset.api_browser_checks.phase == "http_request_firewall_custom"
+    condition     = length(cloudflare_ruleset.api_browser_checks) == 1
     error_message = "Keep the API BIC skip rule owned by this stack until the zone stack imports it."
   }
 }

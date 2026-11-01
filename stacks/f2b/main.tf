@@ -66,7 +66,16 @@ output "collector_credentials" {
   } }
 }
 
+# This stack owns the zone's http_request_firewall_custom entrypoint. Do not
+# add a ruleset with the same phase to the zone stack for this zone. Before
+# moving ownership, import this ruleset into the zone stack and remove it from
+# this state; prevent_destroy blocks an accidental deletion.
+moved {
+  from = cloudflare_ruleset.api_browser_checks
+  to   = cloudflare_ruleset.api_browser_checks[0]
+}
 resource "cloudflare_ruleset" "api_browser_checks" {
+  count       = var.manage_api_browser_check ? 1 : 0
   zone_id     = var.zone_id
   name        = "API clients"
   description = "Allow non-browser REST clients on the two API hosts without bypassing Access."
