@@ -35,7 +35,7 @@ resource "cloudflare_workers_script" "managed" {
       name = "SOURCE_TOKENS", type = "json", json = jsonencode({
         for name, source in var.sources : cloudflare_zero_trust_access_service_token.source[name].client_id => { source = name, jails = sort(tolist(source.jails)) }
       })
-  }] : [])
+  }] : [], each.key == "api" ? [{ name = "READ_LIMITER", type = "ratelimit", namespace_id = "1001", simple = { limit = 120, period = 60 } }] : [])
   lifecycle { prevent_destroy = true }
 }
 resource "cloudflare_workers_script_subdomain" "disabled" {
@@ -78,4 +78,21 @@ output "collector_credentials" {
     source   = name, client_id = token.client_id, client_secret = token.client_secret,
     endpoint = "https://${var.workers["ingest"].hostname}/v1/ingest/snapshot"
   } }
+}
+
+resource "cloudflare_ruleset" "api_browser_checks" {
+  zone_id     = var.zone_id
+  name        = "API clients"
+  description = "Allow non-browser REST clients on the two API hosts without bypassing Access."
+  kind        = "zone"
+  phase       = "http_request_firewall_custom"
+  rules = [{
+    action            = "skip"
+    action_parameters = { products = ["bic"] }
+    expression        = format("http.host in {%s}", join(" ", [for worker in values(var.workers) : jsonencode(worker.hostname)]))
+    description       = "REST clients do not require browser integrity checks"
+    enabled           = true
+    logging           = { enabled = true }
+  }]
+  lifecycle { prevent_destroy = true }
 }
