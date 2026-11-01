@@ -4,21 +4,13 @@ run "free_api_is_separate_from_protected_ingestion" {
     account_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     zone_id    = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     workers = {
-      api    = { name = "test-api", hostname = "api.example.com", source_path = "tests/fixtures/worker.js" }
-      ingest = { name = "test-ingest", hostname = "ingest.example.com", source_path = "tests/fixtures/worker.js" }
+      api    = { name = "test-api", hostname = "api.example.com" }
+      ingest = { name = "test-ingest", hostname = "ingest.example.com" }
     }
     sources = {
       source_one = { jails = ["sshd", "postfix"] }
       source_two = { jails = ["sshd"] }
     }
-  }
-  assert {
-    condition     = length(cloudflare_workers_script.managed) == 2 && length(cloudflare_zero_trust_access_service_token.source) == 2
-    error_message = "Use two Workers and independent collection credentials."
-  }
-  assert {
-    condition     = alltrue([for subdomain in cloudflare_workers_script_subdomain.disabled : !subdomain.enabled && !subdomain.previews_enabled])
-    error_message = "Alternate unprotected endpoints must stay disabled."
   }
   assert {
     condition     = cloudflare_zero_trust_access_application.ingest.domain == "ingest.example.com" && cloudflare_zero_trust_access_application.ingest.policies[0].decision == "non_identity"
@@ -29,7 +21,15 @@ run "free_api_is_separate_from_protected_ingestion" {
     error_message = "Each source path must allow only its assigned service token."
   }
   assert {
-    condition     = alltrue([for worker in cloudflare_workers_script.managed : worker.usage_model == "standard"])
-    error_message = "Avoid container and paid compute resources."
+    condition     = cloudflare_workers_custom_domain.managed["api"].service == "test-api" && cloudflare_workers_custom_domain.managed["ingest"].service == "test-ingest"
+    error_message = "Custom domains must reference the application-owned Worker names."
+  }
+  assert {
+    condition     = length(output.deployment_config.source_scopes) == 2
+    error_message = "Expose each Access audience only through the private deployment output."
+  }
+  assert {
+    condition     = cloudflare_ruleset.api_browser_checks.phase == "http_request_firewall_custom"
+    error_message = "Keep the API BIC skip rule owned by this stack until the zone stack imports it."
   }
 }

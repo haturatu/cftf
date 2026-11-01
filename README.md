@@ -33,7 +33,7 @@ cftf/
 │   ├── zone/                 # 全 Zone が共有する root
 │   ├── r2/
 │   ├── workers/
-│   └── f2b/                   # 公開 API・Access 保護の収集 Worker・D1
+│   └── f2b/                   # 公開 API の基盤（D1・Access・カスタムドメイン）
 ├── modules/zone/             # 既存リソースアドレスを維持する共通定義
 ├── bootstrap/backend/        # State・Config バケットの初期構築と復旧専用
 ├── scripts/tf.sh             # 共通の手動実行窓口
@@ -187,8 +187,8 @@ R2 に S3 のバージョニング機能はないため、state、bootstrap の�
 
 ## Fail2ban API
 
-`stacks/f2b` は公開 API と収集 Worker、D1、Access の組織・Service Token・収集ポリシーを管理します。新規の `f2b` ターゲットは専用 state を使用し、既存 Worker と Zone の state を共有しません。アプリケーションのソースは公開 `f2b-api` リポジトリで管理し、ビルド結果とデプロイ設定を非公開 R2 の新しいリビジョンへ格納します。
+`stacks/f2b` は D1、Access の組織・Service Token・収集ポリシー、カスタムドメイン、WAF を管理します。新規の `f2b` ターゲットは専用 state を使用します。Worker のスクリプト、バインディング、バージョンは公開 `f2b-api` リポジトリの GitHub Actions が Wrangler で配信し、このスタックはスクリプトを管理しません。アプリケーションのビルド結果は非公開 R2 の設定リビジョンに含めません。
 
-両 Worker の `workers.dev` とプレビュー URL を無効にし、収集ドメインを Service Auth で保護します。収集元ごとに Service Token を発行し、API は Cloudflare が検証した Access アプリケーション AUD と設定上の Jail 範囲を照合します。認証用の Secret は Terraform state と各収集サーバーの保護された設定だけに保存します。D1 のスキーマ変更は `f2b-api/migrations` を適用します。
+両 Worker の `workers.dev` とプレビュー URL は Wrangler 設定で無効にし、収集ドメインを Service Auth で保護します。収集元ごとに Service Token を発行し、API は Cloudflare が検証した Access アプリケーション AUD と設定上の Jail 範囲を照合します。認証用の Secret は Terraform state と各収集サーバーの保護された設定だけに保存します。D1 のスキーマ変更は `f2b-api/migrations` を適用します。
 
 固定 Provider の組織リソースは初期作成にも更新 API を使います。Access が未有効なアカウントでは、一度だけ管理 API で組織を初期化し、返された `auth_domain` を非公開の入力値へ保存してから適用します。組織の有効化後は同じリソースが既存組織の設定を管理します。

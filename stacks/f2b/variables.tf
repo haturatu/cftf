@@ -20,15 +20,11 @@ variable "workers" {
   type = map(object({
     name        = string
     hostname    = string
-    source_path = string
+    source_path = optional(string)
   }))
   validation {
     condition     = toset(keys(var.workers)) == toset(["api", "ingest"])
     error_message = "Define exactly the public API and protected ingestion Workers."
-  }
-  validation {
-    condition     = alltrue([for worker in values(var.workers) : fileexists(worker.source_path)])
-    error_message = "Worker bundles must exist."
   }
 }
 variable "sources" {

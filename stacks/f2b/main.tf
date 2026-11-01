@@ -20,31 +20,16 @@ resource "cloudflare_zero_trust_access_service_token" "source" {
   depends_on = [cloudflare_zero_trust_organization.managed]
   lifecycle { prevent_destroy = true }
 }
-resource "cloudflare_workers_script" "managed" {
-  for_each           = var.workers
-  account_id         = var.account_id
-  script_name        = each.value.name
-  content            = file(each.value.source_path)
-  content_sha256     = filesha256(each.value.source_path)
-  main_module        = basename(each.value.source_path)
-  compatibility_date = "2026-10-31"
-  usage_model        = "standard"
-  bindings = concat([
-    { name = "DB", type = "d1", id = cloudflare_d1_database.managed.id },
-    { name = "STALE_SECONDS", type = "plain_text", text = "172800" }
-    ], each.key == "ingest" ? [{
-      name = "SOURCE_SCOPES", type = "json", json = jsonencode({
-        for name, source in var.sources : cloudflare_zero_trust_access_application.source[name].aud => { source = name, jails = sort(tolist(source.jails)) }
-      })
-  }] : [], each.key == "api" ? [{ name = "READ_LIMITER", type = "ratelimit", namespace_id = "1001", simple = { limit = 120, period = 60 } }] : [])
-  lifecycle { prevent_destroy = true }
+# The application Workers are deployed by haturatu/f2b-api with Wrangler.
+# Forget the existing scripts without deleting them so Terraform stops
+# managing their source, bindings, and versions.
+removed {
+  from = cloudflare_workers_script.managed
+  lifecycle { destroy = false }
 }
-resource "cloudflare_workers_script_subdomain" "disabled" {
-  for_each         = var.workers
-  account_id       = var.account_id
-  script_name      = cloudflare_workers_script.managed[each.key].script_name
-  enabled          = false
-  previews_enabled = false
+removed {
+  from = cloudflare_workers_script_subdomain.disabled
+  lifecycle { destroy = false }
 }
 resource "cloudflare_zero_trust_access_application" "ingest" {
   account_id                = var.account_id
@@ -65,8 +50,8 @@ resource "cloudflare_workers_custom_domain" "managed" {
   account_id = var.account_id
   zone_id    = var.zone_id
   hostname   = each.value.hostname
-  service    = cloudflare_workers_script.managed[each.key].script_name
-  depends_on = [cloudflare_zero_trust_access_application.ingest, cloudflare_workers_script_subdomain.disabled]
+  service    = each.value.name
+  depends_on = [cloudflare_zero_trust_access_application.ingest]
   lifecycle { prevent_destroy = true }
 }
 output "database_id" {
@@ -112,4 +97,34 @@ resource "cloudflare_zero_trust_access_application" "source" {
     include = [{ service_token = { token_id = cloudflare_zero_trust_access_service_token.source[each.key].id } }]
   }]
   lifecycle { prevent_destroy = true }
+}
+
+# Private inputs for the Wrangler deployment in haturatu/f2b-api.
+# Export this value only into the protected GitHub environment.
+output "deployment_config" {
+  description = "D1, Worker names, Access audiences, and binding settings for the application deployment."
+  sensitive   = true
+  value = {
+    account_id    = var.account_id
+    database_name = var.database_name
+    database_id   = cloudflare_d1_database.managed.id
+    workers = {
+      for key, worker in var.workers : key => {
+        name     = worker.name
+        hostname = worker.hostname
+      }
+    }
+    source_scopes = {
+      for name, application in cloudflare_zero_trust_access_application.source : application.aud => {
+        source = name
+        jails  = sort(tolist(var.sources[name].jails))
+      }
+    }
+    stale_seconds = "172800"
+    rate_limit = {
+      namespace_id = "1001"
+      limit        = 120
+      period       = 60
+    }
+  }
 }
