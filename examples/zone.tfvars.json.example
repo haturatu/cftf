@@ -8,5 +8,41 @@
   },
   "dns_records": {},
   "settings": {},
-  "rulesets": {}
+  "rulesets": {},
+  "managed_rulesets": {},
+  "bot_management": {
+    "fight_mode": true,
+    "ai_bots_protection": "block",
+    "crawler_protection": "enabled",
+    "is_robots_txt_managed": true
+  },
+  "url_normalization": {
+    "scope": "incoming",
+    "type": "rfc3986"
+  },
+  "dnssec": {
+    "status": "active"
+  },
+  "managed_transforms": {
+    "request_headers": [
+      {
+        "id": "add_waf_credential_check_status_header",
+        "enabled": true
+      }
+    ],
+    "response_headers": [
+      {
+        "id": "add_security_headers",
+        "enabled": true
+      },
+      {
+        "id": "remove_x-powered-by_header",
+        "enabled": true
+      }
+    ]
+  },
+  "leaked_credential_check": true,
+  "authenticated_origin_pulls": false,
+  "access_rules": {},
+  "user_agent_blocking_rules": {}
 }

@@ -83,3 +83,188 @@ run "reject_duplicate_setting_ownership" {
   }
   expect_failures = [var.settings]
 }
+
+run "accept_free_plan_security_controls" {
+  command = plan
+  variables {
+    bot_management = {
+      fight_mode            = true
+      ai_bots_protection    = "block"
+      crawler_protection    = "enabled"
+      is_robots_txt_managed = true
+    }
+    url_normalization = {
+      scope = "incoming"
+      type  = "rfc3986"
+    }
+    dnssec = {
+      status = "active"
+    }
+    managed_transforms = {
+      response_headers = [
+        { id = "add_security_headers", enabled = true },
+        { id = "remove_x-powered-by_header", enabled = true },
+      ]
+    }
+    leaked_credential_check    = true
+    authenticated_origin_pulls = false
+    access_rules = {
+      block_bad_ip = {
+        mode   = "block"
+        target = "ip"
+        value  = "192.0.2.1"
+      }
+    }
+    user_agent_blocking_rules = {
+      block_bad_agent = {
+        mode  = "block"
+        value = "BadBot/1.0"
+      }
+    }
+  }
+}
+
+run "reject_duplicate_ruleset_phase" {
+  command = plan
+  variables {
+    rulesets = {
+      first = {
+        name       = "first"
+        kind       = "zone"
+        phase      = "http_request_firewall_custom"
+        rules_json = jsonencode([])
+      }
+      second = {
+        name       = "second"
+        kind       = "zone"
+        phase      = "http_request_firewall_custom"
+        rules_json = jsonencode([])
+      }
+    }
+  }
+  expect_failures = [var.rulesets]
+}
+
+run "reject_more_than_five_custom_waf_rules" {
+  command = plan
+  variables {
+    rulesets = {
+      custom = {
+        name  = "custom"
+        kind  = "zone"
+        phase = "http_request_firewall_custom"
+        rules_json = jsonencode([
+          for index in range(6) : {
+            action     = "block"
+            expression = "http.request.uri.path eq \"/${index}\""
+          }
+        ])
+      }
+    }
+  }
+  expect_failures = [var.rulesets]
+}
+
+run "accept_free_plan_rate_limit" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "block"
+          expression = "starts_with(http.request.uri.path, \"/api/\")"
+          ratelimit = {
+            characteristics     = ["ip.src"]
+            period              = 10
+            requests_per_period = 30
+            mitigation_timeout  = 10
+          }
+        }])
+      }
+    }
+  }
+}
+
+run "reject_free_plan_rate_limit_period" {
+  command = plan
+  variables {
+    rulesets = {
+      limit = {
+        name  = "limit"
+        kind  = "zone"
+        phase = "http_ratelimit"
+        rules_json = jsonencode([{
+          action     = "block"
+          expression = "starts_with(http.request.uri.path, \"/api/\")"
+          ratelimit = {
+            characteristics     = ["ip.src"]
+            period              = 60
+            requests_per_period = 100
+            mitigation_timeout  = 60
+          }
+        }])
+      }
+    }
+  }
+  expect_failures = [var.rulesets]
+}
+
+run "reject_more_than_ten_user_agent_rules" {
+  command = plan
+  variables {
+    user_agent_blocking_rules = {
+      for index in range(11) : "rule_${index}" => {
+        mode  = "block"
+        value = "BadBot/${index}"
+      }
+    }
+  }
+  expect_failures = [var.user_agent_blocking_rules]
+}
+
+run "reject_invalid_bot_management_value" {
+  command = plan
+  variables {
+    bot_management = {
+      ai_bots_protection = "allow"
+    }
+  }
+  expect_failures = [var.bot_management]
+}
+
+run "reject_invalid_url_normalization_scope" {
+  command = plan
+  variables {
+    url_normalization = {
+      scope = "egress"
+      type  = "rfc3986"
+    }
+  }
+  expect_failures = [var.url_normalization]
+}
+
+run "reject_phase_owned_by_zone_and_managed_rulesets" {
+  command = plan
+  variables {
+    rulesets = {
+      zone_entry = {
+        name       = "zone entry"
+        kind       = "zone"
+        phase      = "http_request_firewall_managed"
+        rules_json = jsonencode([])
+      }
+    }
+    managed_rulesets = {
+      managed_entry = {
+        id         = "22222222222222222222222222222222"
+        name       = "managed entry"
+        phase      = "http_request_firewall_managed"
+        rules_json = jsonencode([])
+      }
+    }
+  }
+  expect_failures = [var.managed_rulesets]
+}
