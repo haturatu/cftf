@@ -54,6 +54,21 @@ resource "cloudflare_workers_custom_domain" "managed" {
   depends_on = [cloudflare_zero_trust_access_application.ingest]
   lifecycle { prevent_destroy = true }
 }
+resource "cloudflare_workers_custom_domain" "api" {
+  count      = var.api_hostname == null ? 0 : 1
+  account_id = var.account_id
+  zone_id    = var.zone_id
+  hostname   = var.api_hostname
+  service    = var.workers["api"].name
+  depends_on = [cloudflare_zero_trust_access_application.ingest]
+  lifecycle { prevent_destroy = true }
+}
+locals {
+  api_hosts = concat(
+    [for worker in values(var.workers) : worker.hostname],
+    var.api_hostname == null ? [] : [var.api_hostname],
+  )
+}
 output "database_id" {
   value     = cloudflare_d1_database.managed.id
   sensitive = true
@@ -84,7 +99,7 @@ resource "cloudflare_ruleset" "api_browser_checks" {
   rules = [{
     action            = "skip"
     action_parameters = { products = ["bic"] }
-    expression        = format("http.host in {%s}", join(" ", [for worker in values(var.workers) : jsonencode(worker.hostname)]))
+    expression        = format("http.host in {%s}", join(" ", [for host in local.api_hosts : jsonencode(host)]))
     description       = "REST clients do not require browser integrity checks"
     enabled           = true
     logging           = { enabled = true }
@@ -117,6 +132,8 @@ output "deployment_config" {
     account_id    = var.account_id
     database_name = var.database_name
     database_id   = cloudflare_d1_database.managed.id
+    api_hostname  = var.api_hostname
+    site_hostname = var.workers["api"].hostname
     workers = {
       for key, worker in var.workers : key => {
         name     = worker.name

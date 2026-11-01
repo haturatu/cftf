@@ -2,7 +2,8 @@ mock_provider "cloudflare" {}
 run "free_api_is_separate_from_protected_ingestion" {
   variables {
     account_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    zone_id    = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    zone_id      = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    api_hostname = "api.example.com"
     workers = {
       api    = { name = "test-api", hostname = "api.example.com" }
       ingest = { name = "test-ingest", hostname = "ingest.example.com" }
@@ -23,6 +24,18 @@ run "free_api_is_separate_from_protected_ingestion" {
   assert {
     condition     = cloudflare_workers_custom_domain.managed["api"].service == "test-api" && cloudflare_workers_custom_domain.managed["ingest"].service == "test-ingest"
     error_message = "Custom domains must reference the application-owned Worker names."
+  }
+  assert {
+    condition     = cloudflare_workers_custom_domain.api[0].hostname == "api.example.com" && cloudflare_workers_custom_domain.api[0].service == "test-api"
+    error_message = "Attach the optional API hostname to the same application Worker."
+  }
+  assert {
+    condition     = strcontains(cloudflare_ruleset.api_browser_checks[0].rules[0].expression, "api.example.com")
+    error_message = "Skip Browser Integrity Check on the dedicated API hostname."
+  }
+  assert {
+    condition     = output.deployment_config.api_hostname == "api.example.com" && output.deployment_config.site_hostname == "api.example.com"
+    error_message = "Expose the site and API hostnames through the private deployment output."
   }
   assert {
     condition     = length(output.deployment_config.source_scopes) == 2

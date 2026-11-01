@@ -43,3 +43,12 @@ variable "manage_api_browser_check" {
   type        = bool
   default     = true
 }
+variable "api_hostname" {
+  description = "Optional additional custom domain for the public API Worker."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.api_hostname == null || can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.api_hostname))
+    error_message = "Supply a valid API hostname."
+  }
+}
