@@ -1,7 +1,42 @@
 {
   "account_id": "REPLACE_WITH_ACCOUNT_ID",
-  "workers": {},
+  "workers": {
+    "authenticated_media_cache": {
+      "name": "authenticated-media-cache",
+      "source_path": "__CFTF_PRIVATE_DIR__/workers/authenticated_media_cache/worker.js",
+      "main_module": "worker.js",
+      "bindings": [],
+      "preserve_binding_types": [],
+      "compatibility_date": "2026-11-08",
+      "compatibility_flags": [],
+      "usage_model": "standard",
+      "logpush": false,
+      "subdomain": {
+        "enabled": false,
+        "previews_enabled": false
+      }
+    }
+  },
   "worker_crons": {},
-  "worker_routes": {},
+  "worker_routes": {
+    "authenticated_media_thumbnail": {
+      "id": "REPLACE_WITH_ROUTE_ID",
+      "zone_id": "REPLACE_WITH_ZONE_ID",
+      "pattern": "assets.example.invalid/api/files/thumbnail*",
+      "worker_key": "authenticated_media_cache"
+    },
+    "authenticated_media_content": {
+      "id": "REPLACE_WITH_ROUTE_ID",
+      "zone_id": "REPLACE_WITH_ZONE_ID",
+      "pattern": "assets.example.invalid/api/files/content*",
+      "worker_key": "authenticated_media_cache"
+    },
+    "authenticated_media_download": {
+      "id": "REPLACE_WITH_ROUTE_ID",
+      "zone_id": "REPLACE_WITH_ZONE_ID",
+      "pattern": "assets.example.invalid/api/files/download*",
+      "worker_key": "authenticated_media_cache"
+    }
+  },
   "worker_domains": {}
 }
