@@ -13,6 +13,8 @@ Zone ごとに同じリソース定義を書くのは面倒なので、Terraform
 | `account_id` / `zone` | Account ID と既存 Zone の情報 |
 | `dns_records` | DNS レコード |
 | `settings` | HTTPS や TLS などの Zone 設定 |
+| `origin_cloud_regions` | Tiered Cache が使うクラウド Origin のリージョンヒント |
+| `origin_ca_certificates` | 秘密鍵を Origin に残したまま発行する Cloudflare Origin CA 証明書 |
 | `rulesets` | 自分で作る WAF、Rate Limiting などの Ruleset |
 | `managed_entrypoints` | Cloudflare 管理 Ruleset を実行する Phase の設定 |
 | `existing_zone_ruleset_phases` | 既存 Phase の重複作成を防ぐための情報 |
@@ -66,6 +68,10 @@ settings = {
 ```
 
 `value_json` は JSON として有効な文字列でなければならず、同じ `setting_id` を二重に指定することもできません。
+
+Origin CA 証明書を管理する場合は、秘密鍵を Origin 側で生成して CSR だけを非公開の入力設定へ渡します。Terraform state には CSR と発行済み証明書が保存されますが、秘密鍵は含めません。発行した証明書を Nginx へ配置して TLS 接続を確認してから、`ssl` を `strict` に切り替えます。
+
+Cloud Region Hint は Cloudflare が Origin IP からクラウド事業者とリージョンを判定するための設定です。Oracle Cloud の場合は `vendor = "oci"` とリージョン識別子を指定します。
 
 このコードは HCL の書き方を示したものです。R2 に保存する設定は `tfvars.json` の形式にします。
 

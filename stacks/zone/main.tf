@@ -6,6 +6,9 @@ module "zone" {
   settings    = local.managed_settings
   rulesets    = var.rulesets
 
+  origin_cloud_regions   = var.origin_cloud_regions
+  origin_ca_certificates = var.origin_ca_certificates
+
   managed_entrypoints = var.managed_entrypoints
   existing_zone_ruleset_phases = toset([
     for ruleset in try(data.cloudflare_rulesets.existing[0].rulesets, toset([])) : ruleset.phase

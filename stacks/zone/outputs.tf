@@ -8,3 +8,9 @@ output "dnssec_status" {
   description = "Cloudflare DNSSEC status after the last apply."
   value       = module.zone.dnssec_status
 }
+
+output "origin_ca_certificates" {
+  description = "Issued Origin CA certificates for installation on the origin."
+  value       = module.zone.origin_ca_certificates
+  sensitive   = true
+}
