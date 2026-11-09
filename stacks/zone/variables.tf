@@ -340,6 +340,53 @@ variable "settings" {
   }
 }
 
+variable "origin_cloud_regions" {
+  description = "Cloudflare Tiered Cache region hints for public cloud origins."
+  type = map(object({
+    origin_ip = string
+    vendor    = string
+    region    = string
+  }))
+  default  = {}
+  nullable = false
+  validation {
+    condition = alltrue([
+      for origin in values(var.origin_cloud_regions) :
+      contains(["aws", "azure", "gcp", "oci"], origin.vendor) &&
+      length(trimspace(origin.origin_ip)) > 0 &&
+      length(trimspace(origin.region)) > 0
+    ])
+    error_message = "Origin region hints require a supported cloud vendor, origin IP, and region identifier."
+  }
+  validation {
+    condition     = length(distinct([for origin in values(var.origin_cloud_regions) : origin.origin_ip])) == length(var.origin_cloud_regions)
+    error_message = "An origin IP can be configured only once per zone."
+  }
+}
+
+variable "origin_ca_certificates" {
+  description = "Cloudflare Origin CA certificates issued from CSRs; private keys stay on the origin."
+  type = map(object({
+    csr                = string
+    hostnames          = list(string)
+    request_type       = optional(string, "origin-ecc")
+    requested_validity = optional(number, 5475)
+  }))
+  default  = {}
+  nullable = false
+  validation {
+    condition = alltrue([
+      for certificate in values(var.origin_ca_certificates) :
+      startswith(trimspace(certificate.csr), "-----BEGIN CERTIFICATE REQUEST-----") &&
+      length(certificate.hostnames) > 0 &&
+      alltrue([for hostname in certificate.hostnames : length(trimspace(hostname)) > 0]) &&
+      contains(["origin-ecc", "origin-rsa", "keyless-certificate"], certificate.request_type) &&
+      contains([7, 30, 90, 365, 730, 1095, 5475], certificate.requested_validity)
+    ])
+    error_message = "Origin CA certificates require a PEM CSR, hostnames, supported request type, and supported validity."
+  }
+}
+
 variable "zone" {
   description = "One existing zone; its local directory alias is unrelated to its Cloudflare ID."
   type = object({

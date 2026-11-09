@@ -7,6 +7,14 @@
     "paused": false
   },
   "dns_records": {},
+  "origin_cloud_regions": {
+    "primary_origin": {
+      "origin_ip": "203.0.113.10",
+      "vendor": "oci",
+      "region": "ap-tokyo-1"
+    }
+  },
+  "origin_ca_certificates": {},
   "settings": {},
   "rulesets": {
     "global_rate_limit": {
